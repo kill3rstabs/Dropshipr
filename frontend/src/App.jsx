@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter , Routes, Route } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import Navbar from './components/Navbar';
 import ProductMappingTable from './components/ProductMappingTableComponent';
@@ -7,7 +7,7 @@ import SettingsLayout from './components/settings';
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter >
       <div className="min-h-screen bg-white">
         <Navbar />
         <main className="container mx-auto py-6">
@@ -18,7 +18,7 @@ function App() {
           </Routes>
         </main>
       </div>
-    </BrowserRouter>
+    </HashRouter >
   );
 }
 
