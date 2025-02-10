@@ -4,7 +4,7 @@ import '../styles/Sidebar.css';
 
 const Sidebar = ({ isOpen, onClose }) => {
   const navItems = [
-    { label: 'Dashboard', href: '/' },
+    { label: 'Dashboard', href: '/dashboard' },
     { label: 'Bulk Upload', href: '/bulk-upload' },
     { label: 'Settings', href: '/settings' }
   ];

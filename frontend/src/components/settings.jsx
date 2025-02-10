@@ -133,34 +133,25 @@ export default function SettingsLayout() {
       {/* Sidebar */}
       <div className="w-64 border-r bg-muted/40 p-4">
         <nav className="space-y-2">
-          <a
-            href="#"
-            className={`block px-4 py-2 rounded-md hover:bg-muted ${activeTab === "api" ? "bg-muted" : ""}`}
-            onClick={() => handleTabChange("api")}
-          >
-            API Tokens / Credentials
-          </a>
-          <a
-            href="#"
-            className={`block px-4 py-2 rounded-md hover:bg-muted ${activeTab === "price-margin" ? "bg-muted" : ""}`}
-            onClick={() => handleTabChange("price-margin")}
-          >
-            Price Margin Formula
-          </a>
-          <a
-            href="#"
-            className={`block px-4 py-2 rounded-md hover:bg-muted ${activeTab === "inventory" ? "bg-muted" : ""}`}
-            onClick={() => handleTabChange("inventory")}
-          >
-            Inventory Formula
-          </a>
-          <a
-            href="#"
-            className={`block px-4 py-2 rounded-md hover:bg-muted ${activeTab === "cycle-time" ? "bg-muted" : ""}`}
-            onClick={() => handleTabChange("cycle-time")}
-          >
-            Inventory Cycle Time
-          </a>
+          {[
+            { id: "api", label: "API Tokens / Credentials" },
+            { id: "price-margin", label: "Price Margin Formula" },
+            { id: "inventory", label: "Inventory Formula" },
+            { id: "cycle-time", label: "Inventory Cycle Time" }
+          ].map((item) => (
+            <a
+              key={item.id}
+              href="#"
+              className={`block px-4 py-2 rounded-md hover:bg-muted ${activeTab === item.id ? "bg-muted" : ""
+                }`}
+              onClick={(e) => {
+                e.preventDefault()
+                handleTabChange(item.id)
+              }}
+            >
+              {item.label}
+            </a>
+          ))}
         </nav>
       </div>
 
