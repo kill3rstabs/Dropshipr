@@ -17,7 +17,7 @@ const Navbar = () => {
 
   const handleLogout = () => {
     setIsDropdownOpen(false);
-    toast.success("Logged In Successfully")
+    toast.success("Logged Out Successfully")
     navigate('/');
   };
 
