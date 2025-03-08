@@ -10,9 +10,9 @@ const Navbar = () => {
   const navigate = useNavigate();
 
   const navItems = [
-    { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Bulk Upload', href: '/bulk-upload' },
-    { label: 'Settings', href: '/settings' }
+    // { label: 'Dashboard', href: '/dashboard' },
+    // { label: 'Bulk Upload', href: '/bulk-upload' },
+    // { label: 'Settings', href: '/settings' }
   ];
 
   const handleLogout = () => {

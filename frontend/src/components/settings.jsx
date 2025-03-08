@@ -1,421 +1,165 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Plus, Trash2, Copy, Eye, EyeOff } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useState } from "react"
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";  // Import useNavigate
+import { Search, Plus, Pencil, Trash2 } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
+import { Switch } from "../components/ui/switch";
+import { toast } from "react-toastify";
 
-export default function SettingsLayout() {
-  const vendors = ["Vendor A", "Vendor B", "Vendor C"]
-  const [selectedVendor, setSelectedVendor] = useState(vendors[0])
-  const [showSecret, setShowSecret] = useState(false)
-  const [activeTab, setActiveTab] = useState("api")
+// Fallback initial stores if localStorage is empty
+const initialStores = [
+  { id: 1, name: "Tech Gadgets Store", marketplace: "Amazon", active: true },
+  { id: 2, name: "Fashion Outlet", marketplace: "Shopify", active: true },
+  { id: 3, name: "Home Essentials", marketplace: "eBay", active: true },
+  { id: 4, name: "Organic Foods", marketplace: "Etsy", active: false },
+];
 
-  // Updated price ranges state to include lower and upper bounds
-  const [priceRanges, setPriceRanges] = useState({
-    "Vendor A": [
-      {
-        vendorPriceLower: "",
-        vendorPriceUpper: "",
-        marketplaceProfitLower: "",
-        marketplaceProfitUpper: "",
-      },
-    ],
-    "Vendor B": [
-      {
-        vendorPriceLower: "",
-        vendorPriceUpper: "",
-        marketplaceProfitLower: "",
-        marketplaceProfitUpper: "",
-      },
-    ],
-    "Vendor C": [
-      {
-        vendorPriceLower: "",
-        vendorPriceUpper: "",
-        marketplaceProfitLower: "",
-        marketplaceProfitUpper: "",
-      },
-    ],
-  })
+export default function StoreListingPage() {
+  const [stores, setStores] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const navigate = useNavigate();  // Initialize the navigate function
 
-  // State for inventory ranges
-  const [inventoryRanges, setInventoryRanges] = useState({
-    "Vendor A": [
-      {
-        vendorQtyLower: "",
-        vendorQtyUpper: "",
-        marketplaceQtyLower: "",
-        marketplaceQtyUpper: "",
-      },
-    ],
-    "Vendor B": [
-      {
-        vendorQtyLower: "",
-        vendorQtyUpper: "",
-        marketplaceQtyLower: "",
-        marketplaceQtyUpper: "",
-      },
-    ],
-    "Vendor C": [
-      {
-        vendorQtyLower: "",
-        vendorQtyUpper: "",
-        marketplaceQtyLower: "",
-        marketplaceQtyUpper: "",
-      },
-    ],
-  })
+  // Fetch stores from localStorage on component mount
+  useEffect(() => {
+    const storedStores = JSON.parse(localStorage.getItem('stores') || '[]');
+    // If no stores in localStorage yet, use initialStores
+    if (storedStores.length === 0) {
+      setStores(initialStores);
+      localStorage.setItem('stores', JSON.stringify(initialStores));
+    } else {
+      setStores(storedStores);
+    }
+  }, []);
 
-  const [cycleTime, setCycleTime] = useState("12:00")
+  const filteredStores = stores.filter((store) =>
+    store.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (store.storeInfo?.storeName?.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
-  const addPriceRange = (vendor) => {
-    setPriceRanges({
-      ...priceRanges,
-      [vendor]: [
-        ...priceRanges[vendor],
-        {
-          vendorPriceLower: "",
-          vendorPriceUpper: "",
-          marketplaceProfitLower: "",
-          marketplaceProfitUpper: "",
-        },
-      ],
-    })
-  }
+  const handleToggleActive = (id) => {
+    const updatedStores = stores.map((store) => 
+      store.id === id ? { ...store, active: !store.active } : store
+    );
+    setStores(updatedStores);
+    localStorage.setItem('stores', JSON.stringify(updatedStores));
+  };
 
-  const addInventoryRange = (vendor) => {
-    setInventoryRanges({
-      ...inventoryRanges,
-      [vendor]: [
-        ...inventoryRanges[vendor],
-        {
-          vendorQtyLower: "",
-          vendorQtyUpper: "",
-          marketplaceQtyLower: "",
-          marketplaceQtyUpper: "",
-        },
-      ],
-    })
-  }
+  const handleEditStore = (store) => {
+    navigate("/create-store", { state: { storeData: store } });
+  };
 
-  const removePriceRange = (vendor, index) => {
-    const newRanges = { ...priceRanges }
-    newRanges[vendor].splice(index, 1)
-    setPriceRanges(newRanges)
-  }
+  const handleDeleteStore = (id) => {
+    const updatedStores = stores.filter(store => store.id !== id);
+    setStores(updatedStores);
+    localStorage.setItem('stores', JSON.stringify(updatedStores));
+    toast.success("Store deleted successfully");
+  };
 
-  const removeInventoryRange = (vendor, index) => {
-    const newRanges = { ...inventoryRanges }
-    newRanges[vendor].splice(index, 1)
-    setInventoryRanges(newRanges)
-  }
+  // Function to get the store name
+  const getStoreName = (store) => {
+    return store.name || store.storeInfo?.storeName || "Unnamed Store";
+  };
 
-  const updatePriceRange = (vendor, index, field, value) => {
-    const newRanges = { ...priceRanges }
-    newRanges[vendor][index][field] = value
-    setPriceRanges(newRanges)
-  }
-
-  const updateInventoryRange = (vendor, index, field, value) => {
-    const newRanges = { ...inventoryRanges }
-    newRanges[vendor][index][field] = value
-    setInventoryRanges(newRanges)
-  }
-
-  const handleTabChange = (value) => {
-    setActiveTab(value)
-  }
+  // Function to get the marketplace
+  const getMarketplace = (store) => {
+    if (store.marketplace) return store.marketplace;
+    
+    if (store.storeInfo?.marketplace) {
+      // Handle marketplace that is stored as an ID
+      const marketplaceId = store.storeInfo.marketplace;
+      const marketplaces = {
+        "amazon": "Amazon",
+        "ebay": "eBay",
+        "etsy": "Etsy",
+        "shopify": "Shopify",
+        "walmart": "Walmart",
+        "flipkart": "Flipkart",
+        "meesho": "Meesho"
+      };
+      return marketplaces[marketplaceId] || marketplaceId;
+    }
+    
+    return "Unknown";
+  };
 
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <div className="w-64 border-r bg-muted/40 p-4">
-        <nav className="space-y-2">
-          {[
-            { id: "api", label: "API Tokens / Credentials" },
-            { id: "price-margin", label: "Price Margin Formula" },
-            { id: "inventory", label: "Inventory Formula" },
-            { id: "cycle-time", label: "Inventory Cycle Time" }
-          ].map((item) => (
-            <a
-              key={item.id}
-              href="#"
-              className={`block px-4 py-2 rounded-md hover:bg-muted ${activeTab === item.id ? "bg-muted" : ""
-                }`}
-              onClick={(e) => {
-                e.preventDefault()
-                handleTabChange(item.id)
-              }}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
+    <div className="container mx-auto py-10 px-4 md:px-6 max-w-6xl space-y-8">
+      <h1 className="text-3xl font-bold tracking-tight mb-6">Stores</h1>
+
+      <div className="flex flex-col sm:flex-row justify-between gap-6 mb-8">
+        <div className="relative w-full sm:max-w-xs">
+          <label className="text-sm text-muted-foreground mb-1 block">Search by Name</label>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search..."
+              className="pl-8"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Use navigate() to go to /create-store route */}
+        <Button className="self-end" onClick={() => navigate("/create-store")}>
+          <Plus className="mr-2 h-4 w-4" />
+          NEW
+        </Button>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 p-6">
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="api">API Tokens</TabsTrigger>
-            <TabsTrigger value="price-margin">Price Margin</TabsTrigger>
-            <TabsTrigger value="inventory">Inventory</TabsTrigger>
-            <TabsTrigger value="cycle-time">Cycle Time</TabsTrigger>
-          </TabsList>
-
-          {/* API Tokens Tab */}
-          <TabsContent value="api">
-            <Card>
-              <CardHeader>
-                <CardTitle>API Tokens / Credentials</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Client ID</label>
-                  <div className="flex">
-                    <Input type="text" value="your-client-id-here" readOnly className="flex-grow" />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="ml-2"
-                      onClick={() => {
-                        navigator.clipboard.writeText("your-client-id-here")
-                        // You might want to add a toast notification here
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Client Secret</label>
-                  <div className="flex">
-                    <Input
-                      type={showSecret ? "text" : "password"}
-                      value="your-client-secret-here"
-                      readOnly
-                      className="flex-grow"
-                    />
-                    <Button variant="outline" size="icon" className="ml-2" onClick={() => setShowSecret(!showSecret)}>
-                      {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="ml-2"
-                      onClick={() => {
-                        navigator.clipboard.writeText("your-client-secret-here")
-                        // You might want to add a toast notification here
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <Button>Generate New Credentials</Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Price Margin Tab */}
-          <TabsContent value="price-margin">
-            <Card>
-              <CardHeader>
-                <CardTitle>Price Margin Formula</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Select value={selectedVendor} onValueChange={setSelectedVendor}>
-                  <SelectTrigger>
-                    <SelectValue>{selectedVendor}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vendors.map((vendor) => (
-                      <SelectItem key={vendor} value={vendor}>
-                        {vendor}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <div className="mt-4 space-y-6">
-                  {priceRanges[selectedVendor].map((range, index) => (
-                    <div key={index} className="space-y-4 p-4 border rounded-lg">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Vendor Price Range</label>
-                          <div className="flex gap-2 items-center">
-                            <Input
-                              type="number"
-                              placeholder="Lower bound"
-                              value={range.vendorPriceLower}
-                              onChange={(e) =>
-                                updatePriceRange(selectedVendor, index, "vendorPriceLower", e.target.value)
-                              }
-                            />
-                            <span>to</span>
-                            <Input
-                              type="number"
-                              placeholder="Upper bound"
-                              value={range.vendorPriceUpper}
-                              onChange={(e) =>
-                                updatePriceRange(selectedVendor, index, "vendorPriceUpper", e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Marketplace Profit Range</label>
-                          <div className="flex gap-2 items-center">
-                            <Input
-                              type="number"
-                              placeholder="Lower bound"
-                              value={range.marketplaceProfitLower}
-                              onChange={(e) =>
-                                updatePriceRange(selectedVendor, index, "marketplaceProfitLower", e.target.value)
-                              }
-                            />
-                            <span>to</span>
-                            <Input
-                              type="number"
-                              placeholder="Upper bound"
-                              value={range.marketplaceProfitUpper}
-                              onChange={(e) =>
-                                updatePriceRange(selectedVendor, index, "marketplaceProfitUpper", e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      {index > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removePriceRange(selectedVendor, index)}
-                          className="absolute top-2 right-2"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
+      <div className="border rounded-md shadow-sm overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="px-4">Store Name</TableHead>
+              <TableHead className="px-4">Marketplace</TableHead>
+              <TableHead className="px-4">Active</TableHead>
+              <TableHead className="px-4">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredStores.length > 0 ? (
+              filteredStores.map((store) => (
+                <TableRow key={store.id}>
+                  <TableCell className="font-medium py-4 px-4">{getStoreName(store)}</TableCell>
+                  <TableCell className="py-4 px-4">{getMarketplace(store)}</TableCell>
+                  <TableCell className="py-4 px-4">
+                    <Switch checked={store.active} onCheckedChange={() => handleToggleActive(store.id)} />
+                  </TableCell>
+                  <TableCell className="py-4 px-4">
+                    <div className="flex gap-3">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8"
+                        onClick={() => handleEditStore(store)}
+                      >
+                        <Pencil className="h-4 w-4 text-blue-500" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8"
+                        onClick={() => handleDeleteStore(store.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
                     </div>
-                  ))}
-                  <Button onClick={() => addPriceRange(selectedVendor)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Price Range
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Inventory Tab */}
-          <TabsContent value="inventory">
-            <Card>
-              <CardHeader>
-                <CardTitle>Inventory Formula</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Select value={selectedVendor} onValueChange={setSelectedVendor}>
-                  <SelectTrigger>
-                    <SelectValue>{selectedVendor}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vendors.map((vendor) => (
-                      <SelectItem key={vendor} value={vendor}>
-                        {vendor}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <div className="mt-4 space-y-6">
-                  {inventoryRanges[selectedVendor].map((range, index) => (
-                    <div key={index} className="space-y-4 p-4 border rounded-lg">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Vendor Quantity Range</label>
-                          <div className="flex gap-2 items-center">
-                            <Input
-                              type="number"
-                              placeholder="Lower bound"
-                              value={range.vendorQtyLower}
-                              onChange={(e) =>
-                                updateInventoryRange(selectedVendor, index, "vendorQtyLower", e.target.value)
-                              }
-                            />
-                            <span>to</span>
-                            <Input
-                              type="number"
-                              placeholder="Upper bound"
-                              value={range.vendorQtyUpper}
-                              onChange={(e) =>
-                                updateInventoryRange(selectedVendor, index, "vendorQtyUpper", e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Marketplace Quantity Range</label>
-                          <div className="flex gap-2 items-center">
-                            <Input
-                              type="number"
-                              placeholder="Lower bound"
-                              value={range.marketplaceQtyLower}
-                              onChange={(e) =>
-                                updateInventoryRange(selectedVendor, index, "marketplaceQtyLower", e.target.value)
-                              }
-                            />
-                            <span>to</span>
-                            <Input
-                              type="number"
-                              placeholder="Upper bound"
-                              value={range.marketplaceQtyUpper}
-                              onChange={(e) =>
-                                updateInventoryRange(selectedVendor, index, "marketplaceQtyUpper", e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      {index > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeInventoryRange(selectedVendor, index)}
-                          className="absolute top-2 right-2"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                  <Button onClick={() => addInventoryRange(selectedVendor)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Quantity Range
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Cycle Time Tab */}
-          <TabsContent value="cycle-time">
-            <Card>
-              <CardHeader>
-                <CardTitle>Inventory Cycle Time</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Update Frequency</label>
-                  <Input type="time" value={cycleTime} onChange={(e) => setCycleTime(e.target.value)} />
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                  No stores found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
       </div>
     </div>
-  )
+  );
 }
-

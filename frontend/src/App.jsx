@@ -4,9 +4,9 @@ import { ToastContainer } from "react-toastify";
 import Navbar from "./components/Navbar";
 import ProductMappingTable from "./components/ProductMappingTableComponent";
 import "react-toastify/dist/ReactToastify.css";
-import SettingsLayout from "./components/settings";
+import StoreListingPage from "./components/settings";
 import AuthPage from "./components/AuthComponent";
-
+import MultiStepForm from "./components/MultiStepForm";
 function App() {
   return (
     <HashRouter>
@@ -27,7 +27,8 @@ function MainLayout() {
           <Route path="/" element={<AuthPage />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/bulk-upload" element={<ProductMappingTable />} />
-          <Route path="/settings" element={<SettingsLayout />} />
+          <Route path="/settings" element={<StoreListingPage />} />
+          <Route path="/create-store" element={<MultiStepForm />} />
         </Routes>
       </main>
       <ToastContainer
