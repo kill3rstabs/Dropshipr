@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import '../styles/Navbar.css';
 import Sidebar from './Sidebar';
+import { Search, User } from 'lucide-react';
 
 const Navbar = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -36,18 +37,23 @@ const Navbar = () => {
           </Link>
         </div>
 
-        <div className="nav-links">
-          {navItems.map((item, index) => (
-            <Link key={index} to={item.href} className="nav-item">
-              {item.label}
-            </Link>
-          ))}
+        <div className="flex-grow mx-4">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search..."
+              className="w-full py-2 pl-10 pr-4 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="text-gray-400" />
+            </div>
+          </div>
         </div>
 
         {/* Avatar Dropdown */}
         <div className="nav-actions relative">
-          <div className="avatar cursor-pointer" onClick={() => setIsDropdownOpen(!isDropdownOpen)}>
-            <img src="/placeholder.svg?height=32&width=32" alt="User avatar" />
+          <div className="cursor-pointer" onClick={() => setIsDropdownOpen(!isDropdownOpen)}>
+            <User className="text-white bg-gray-700 rounded-full p-1" size={32} />
           </div>
 
           {isDropdownOpen && (

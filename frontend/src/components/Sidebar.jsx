@@ -1,12 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import '../styles/Sidebar.css';
+import { LayoutDashboard, Upload, Settings } from 'lucide-react';
 
 const Sidebar = ({ isOpen, onClose }) => {
   const navItems = [
-    { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Bulk Upload', href: '/bulk-upload' },
-    { label: 'Settings', href: '/settings' }
+    { label: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard /> },
+    { label: 'Bulk Upload', href: '/bulk-upload', icon: <Upload /> },
+    { label: 'Settings', href: '/settings', icon: <Settings /> }
   ];
 
   return (
@@ -35,7 +36,10 @@ const Sidebar = ({ isOpen, onClose }) => {
               className="sidebar-nav-item"
               onClick={onClose}
             >
-              {item.label}
+              <div className="flex items-center">
+                {item.icon}
+                <span className="ml-4">{item.label}</span>
+              </div>
             </Link>
           ))}
         </nav>
