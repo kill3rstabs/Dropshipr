@@ -18,6 +18,9 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        walmart: "bg-[#0071ce] text-white hover:bg-[#0056a3] shadow-sm",
+        walmartYellow: "bg-[#ffc220] text-gray-800 hover:bg-[#e6b01e] shadow-sm",
+        walmartOutline: "border border-[#0071ce] text-[#0071ce] hover:bg-[#0071ce] hover:text-white",
       },
       size: {
         default: "h-10 px-4 py-2",

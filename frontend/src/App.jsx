@@ -7,6 +7,7 @@ import "react-toastify/dist/ReactToastify.css";
 import StoreListingPage from "./components/settings";
 import AuthPage from "./components/AuthComponent";
 import MultiStepForm from "./components/MultiStepForm";
+
 function App() {
   return (
     <HashRouter>
@@ -20,9 +21,9 @@ function MainLayout() {
   const isAuthPage = location.pathname === "/";
 
   return (
-    <div className="min-h-screen bg-white">
-      {!isAuthPage && <Navbar />} {/* 👈 Hide Navbar on Auth Page */}
-      <main className="container mx-auto py-6">
+    <div className="min-h-screen bg-walmart-gray">
+      {!isAuthPage && <Navbar />}
+      <main className={`${!isAuthPage ? 'pt-0' : ''}`}>
         <Routes>
           <Route path="/" element={<AuthPage />} />
           <Route path="/dashboard" element={<Dashboard />} />
@@ -38,6 +39,8 @@ function MainLayout() {
         closeOnClick
         pauseOnHover
         draggable
+        toastClassName="walmart-toast"
+        progressClassName="walmart-progress"
       />
     </div>
   );

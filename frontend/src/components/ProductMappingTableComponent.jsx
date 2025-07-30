@@ -48,42 +48,41 @@ const ProductMappingTable = () => {
   }
 
   return (
-    <div className="container">
-      {/* Flex container for heading and button */}
-      <div className="header">
-        <h1>Bulk Upload</h1>
-        <button className="btn btn-primary">Upload</button>
+    <div className="container mx-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Bulk Upload</h1>
+        <button className="btn btn-primary bg-primary text-white hover:bg-primary/90">Upload</button>
       </div>
       
-      <p className="description">Please upload the excel file with one Vendor and Marketplace only.</p>
+      <p className="description text-gray-600 mb-6">Please upload the excel file with one Vendor and Marketplace only.</p>
 
-      <div className="table-container">
-        <table>
-          <thead>
+      <div className="table-container shadow-md rounded-lg overflow-hidden">
+        <table className="min-w-full">
+          <thead className="bg-gray-200 text-gray-700">
             <tr>
-              <th>Date</th>
-              <th>User Name</th>
-              <th>Vendor Name</th>
-              <th>Marketplace</th>
-              <th>Items Uploaded</th>
-              <th>Items Added</th>
-              <th>Status</th>
-              <th>Error Logs</th>
+              <th className="py-3 px-4 text-left">Date</th>
+              <th className="py-3 px-4 text-left">User Name</th>
+              <th className="py-3 px-4 text-left">Vendor Name</th>
+              <th className="py-3 px-4 text-left">Marketplace</th>
+              <th className="py-3 px-4 text-right">Items Uploaded</th>
+              <th className="py-3 px-4 text-right">Items Added</th>
+              <th className="py-3 px-4 text-left">Status</th>
+              <th className="py-3 px-4 text-left">Error Logs</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-gray-200">
             {mockData.map((row, index) => (
-              <tr key={index}>
-                <td>{row.date}</td>
-                <td>{row.userName}</td>
-                <td>{row.vendorName}</td>
-                <td>{row.marketplace}</td>
-                <td className="text-right">{row.itemsUploaded}</td>
-                <td className="text-right">{row.itemsAdded}</td>
-                <td>
+              <tr key={index} className="hover:bg-gray-100">
+                <td className="py-3 px-4">{row.date}</td>
+                <td className="py-3 px-4">{row.userName}</td>
+                <td className="py-3 px-4">{row.vendorName}</td>
+                <td className="py-3 px-4">{row.marketplace}</td>
+                <td className="py-3 px-4 text-right">{row.itemsUploaded}</td>
+                <td className="py-3 px-4 text-right">{row.itemsAdded}</td>
+                <td className="py-3 px-4">
                   <span className={`badge ${getStatusClass(row.status)}`}>{row.status}</span>
                 </td>
-                <td>{row.errorLogs}</td>
+                <td className="py-3 px-4">{row.errorLogs}</td>
               </tr>
             ))}
           </tbody>
