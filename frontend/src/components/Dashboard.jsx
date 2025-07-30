@@ -5,11 +5,7 @@ import {
   Package, 
   TrendingUp, 
   AlertTriangle,
-  DollarSign,
-  Plus,
-  Upload,
-  Download,
-  ExternalLink
+  DollarSign
 } from "lucide-react"
 
 export default function Dashboard() {
@@ -46,7 +42,7 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      {/* Key Metrics Cards */}
+      {/* Key Metrics Cards
       <div className="grid gap-6 mb-8 md:grid-cols-2 lg:grid-cols-4">
         <Card className="walmart-card">
           <CardContent className="p-6">
@@ -119,27 +115,7 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="grid gap-4 mb-8 md:grid-cols-2 lg:grid-cols-4">
-        <Button className="walmart-button-primary w-full">
-          <Plus className="mr-2 h-5 w-5" />
-          New Purchase Order
-        </Button>
-        <Button className="walmart-button-secondary w-full">
-          <Package className="mr-2 h-5 w-5" />
-          Add Product
-        </Button>
-        <Button className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 w-full">
-          <Upload className="mr-2 h-5 w-5" />
-          Upload Receipt
-        </Button>
-        <Button className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 w-full">
-          <Download className="mr-2 h-5 w-5" />
-          Export Data
-        </Button>
-      </div>
+      </div> */}
 
       {/* Main Content Grid */}
       <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
@@ -199,39 +175,6 @@ export default function Dashboard() {
                   <span className="text-md font-semibold text-gray-900">{marketplace.date}</span>
                 </div>
               ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Bottom Information Sections */}
-      <div className="grid gap-8 mt-8 md:grid-cols-2">
-        <Card className="walmart-card">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xl font-semibold">Recent Purchase Orders</CardTitle>
-            <Button variant="link" className="text-primary hover:text-primary-600">
-              View All <ExternalLink className="ml-1 h-4 w-4" />
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center py-8 text-gray-500">
-              <Package className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p>No recent purchase orders</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="walmart-card">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xl font-semibold">Low Stock Alerts</CardTitle>
-            <Button variant="link" className="text-primary hover:text-primary-600">
-              View Inventory <ExternalLink className="ml-1 h-4 w-4" />
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center py-8 text-gray-500">
-              <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p>No low stock alerts</p>
             </div>
           </CardContent>
         </Card>

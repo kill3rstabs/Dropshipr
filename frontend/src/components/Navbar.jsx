@@ -40,7 +40,7 @@ const Navbar = () => {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">Dropshipr</h1>
-                <p className="text-xs text-blue-100">Warehouse Management</p>
+                <p className="text-xs text-blue-100">Inventory Management</p>
               </div>
             </Link>
           </div>
@@ -78,7 +78,7 @@ const Navbar = () => {
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-medium">John Doe</p>
-                  <p className="text-xs text-blue-100">Warehouse Manager</p>
+                  <p className="text-xs text-blue-100">Inventory Manager</p>
                 </div>
               </button>
 
