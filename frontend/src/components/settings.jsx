@@ -1,59 +1,104 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";  // Import useNavigate
+import { useNavigate } from "react-router-dom";
 import { Search, Plus, Pencil, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { toast } from "react-toastify";
-
-// Fallback initial stores if localStorage is empty
-const initialStores = [
-  { id: 1, name: "Tech Gadgets Store", marketplace: "Amazon", active: true },
-  { id: 2, name: "Fashion Outlet", marketplace: "Shopify", active: true },
-  { id: 3, name: "Home Essentials", marketplace: "eBay", active: true },
-  { id: 4, name: "Organic Foods", marketplace: "Etsy", active: false },
-];
+import { marketplaceAPI, transformStoreDataForFrontend } from "../services/api";
 
 export default function StoreListingPage() {
   const [stores, setStores] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const navigate = useNavigate();  // Initialize the navigate function
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
-  // Fetch stores from localStorage on component mount
+  // Fetch stores from API on component mount
   useEffect(() => {
-    const storedStores = JSON.parse(localStorage.getItem('stores') || '[]');
-    // If no stores in localStorage yet, use initialStores
-    if (storedStores.length === 0) {
-      setStores(initialStores);
-      localStorage.setItem('stores', JSON.stringify(initialStores));
-    } else {
-      setStores(storedStores);
-    }
+    fetchStores();
   }, []);
+
+  const fetchStores = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const storesData = await marketplaceAPI.getStores({ active_only: false });
+      const transformedStores = storesData.map(transformStoreDataForFrontend);
+      setStores(transformedStores);
+    } catch (err) {
+      console.error('Error fetching stores:', err);
+      setError('Failed to load stores');
+      toast.error('Failed to load stores');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredStores = stores.filter((store) =>
     store.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
     (store.storeInfo?.storeName?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const handleToggleActive = (id) => {
-    const updatedStores = stores.map((store) => 
-      store.id === id ? { ...store, active: !store.active } : store
-    );
-    setStores(updatedStores);
-    localStorage.setItem('stores', JSON.stringify(updatedStores));
+  const handleToggleActive = async (id) => {
+    try {
+      const store = stores.find(s => s.id === id);
+      if (!store) return;
+
+      // Update the store's active status
+      const updatedStore = { ...store, is_active: !store.is_active };
+      
+      // Call API to update store
+      await marketplaceAPI.updateStore(id, {
+        name: store.name,
+        marketplace_id: store.marketplace_id,
+        api_key_enc: store.storeInfo?.apiKey || "",
+        price_settings: {
+          purchase_tax_percentage: parseFloat(store.priceSettings.purchaseTax) || 0,
+          marketplace_fees_percentage: parseFloat(store.priceSettings.marketplaceFees) || 0,
+          price_ranges: store.priceSettings.priceRanges.map(range => ({
+            from_value: parseFloat(range.from) || 0,
+            to_value: range.to || "MAX",
+            margin_percentage: parseFloat(range.margin) || 0,
+            minimum_margin_cents: parseInt(range.minimumMargin) * 100 || 0
+          }))
+        },
+        inventory_settings: {
+          inventory_ranges: store.inventorySettings.priceRanges.map(range => ({
+            from_value: parseFloat(range.from) || 0,
+            to_value: range.to || "MAX",
+            multiplier: parseFloat(range.multipliedWith) || 0
+          }))
+        }
+      });
+
+      // Update local state
+      const updatedStores = stores.map((store) => 
+        store.id === id ? { ...store, is_active: !store.is_active } : store
+      );
+      setStores(updatedStores);
+      toast.success(`Store ${store.is_active ? 'deactivated' : 'activated'} successfully`);
+    } catch (err) {
+      console.error('Error updating store:', err);
+      toast.error('Failed to update store status');
+    }
   };
 
   const handleEditStore = (store) => {
     navigate("/create-store", { state: { storeData: store } });
   };
 
-  const handleDeleteStore = (id) => {
-    const updatedStores = stores.filter(store => store.id !== id);
-    setStores(updatedStores);
-    localStorage.setItem('stores', JSON.stringify(updatedStores));
-    toast.success("Store deleted successfully");
+  const handleDeleteStore = async (id) => {
+    try {
+      await marketplaceAPI.deleteStore(id);
+      const updatedStores = stores.filter(store => store.id !== id);
+      setStores(updatedStores);
+      toast.success("Store deleted successfully");
+    } catch (err) {
+      console.error('Error deleting store:', err);
+      toast.error('Failed to delete store');
+    }
   };
 
   // Function to get the store name
@@ -83,6 +128,26 @@ export default function StoreListingPage() {
     return "Unknown";
   };
 
+  if (loading) {
+    return (
+      <div className="container mx-auto py-10 px-4 md:px-6 max-w-6xl">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-lg">Loading stores...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto py-10 px-4 md:px-6 max-w-6xl">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-lg text-red-600">{error}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto py-10 px-4 md:px-6 max-w-6xl space-y-8">
       <h1 className="text-3xl font-bold tracking-tight mb-6">Stores</h1>
@@ -102,7 +167,6 @@ export default function StoreListingPage() {
           </div>
         </div>
 
-        {/* Use navigate() to go to /create-store route */}
         <Button className="self-end" onClick={() => navigate("/create-store")}>
           <Plus className="mr-2 h-4 w-4" />
           NEW
@@ -126,7 +190,7 @@ export default function StoreListingPage() {
                   <TableCell className="font-medium py-4 px-4">{getStoreName(store)}</TableCell>
                   <TableCell className="py-4 px-4">{getMarketplace(store)}</TableCell>
                   <TableCell className="py-4 px-4">
-                    <Switch checked={store.active} onCheckedChange={() => handleToggleActive(store.id)} />
+                    <Switch checked={store.is_active} onCheckedChange={() => handleToggleActive(store.id)} />
                   </TableCell>
                   <TableCell className="py-4 px-4">
                     <div className="flex gap-3">

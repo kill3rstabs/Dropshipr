@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Plus, Trash2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { marketplaceAPI, transformStoreDataForAPI } from "../services/api";
 
 export default function CreateStoreForm() {
   const navigate = useNavigate();
@@ -19,6 +20,8 @@ export default function CreateStoreForm() {
   const [activeStep, setActiveStep] = useState("store-info");
   const [isEditMode, setIsEditMode] = useState(false);
   const [storeId, setStoreId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [marketplaces, setMarketplaces] = useState([]);
 
   // Store Information State
   const [storeInfo, setStoreInfo] = useState({
@@ -38,14 +41,20 @@ export default function CreateStoreForm() {
     priceRanges: [{ from: "", to: "MAX", multipliedWith: "" }],
   });
 
-  // Sample marketplaces
-  const marketplaces = [
-    { id: "amazon", name: "Amazon" },
-    { id: "ebay", name: "eBay" },
-    { id: "etsy", name: "Etsy" },
-    { id: "shopify", name: "Shopify" },
-    { id: "walmart", name: "Walmart" },
-  ];
+  // Fetch marketplaces from API
+  useEffect(() => {
+    fetchMarketplaces();
+  }, []);
+
+  const fetchMarketplaces = async () => {
+    try {
+      const marketplacesData = await marketplaceAPI.getMarketplaces();
+      setMarketplaces(marketplacesData);
+    } catch (err) {
+      console.error('Error fetching marketplaces:', err);
+      toast.error('Failed to load marketplaces');
+    }
+  };
 
   // Check if we're in edit mode
   useEffect(() => {
@@ -98,38 +107,30 @@ export default function CreateStoreForm() {
 
   const updatePriceRange = (index, field, value) => {
     const numericValue = value.replace(/[^0-9.]/g, "");
-    const updatedRanges = [...priceSettings.priceRanges];
-    updatedRanges[index] = {
-      ...updatedRanges[index],
-      [field]: numericValue,
-    };
-
     setPriceSettings((prev) => ({
       ...prev,
-      priceRanges: updatedRanges,
+      priceRanges: prev.priceRanges.map((range, i) =>
+        i === index ? { ...range, [field]: numericValue } : range
+      ),
     }));
   };
 
   const removePriceRange = (index) => {
-    if (priceSettings.priceRanges.length > 1) {
-      const updatedRanges = priceSettings.priceRanges.filter((_, i) => i !== index);
-
-      if (index === priceSettings.priceRanges.length - 1) {
-        const newLastIndex = updatedRanges.length - 1;
-        updatedRanges[newLastIndex] = {
-          ...updatedRanges[newLastIndex],
-          to: "MAX",
-        };
-      }
-
-      setPriceSettings((prev) => ({
-        ...prev,
-        priceRanges: updatedRanges,
-      }));
-    }
+    setPriceSettings((prev) => ({
+      ...prev,
+      priceRanges: prev.priceRanges.filter((_, i) => i !== index),
+    }));
   };
 
   // Inventory Settings Handlers
+  const updateInventorySettings = (field, value) => {
+    const numericValue = field !== "priceRanges" ? value.replace(/[^0-9.]/g, "") : value;
+    setInventorySettings((prev) => ({
+      ...prev,
+      [field]: numericValue,
+    }));
+  };
+
   const addInventoryRange = () => {
     const updatedRanges = [...inventorySettings.priceRanges];
     const lastIndex = updatedRanges.length - 1;
@@ -150,40 +151,28 @@ export default function CreateStoreForm() {
 
   const updateInventoryRange = (index, field, value) => {
     const numericValue = value.replace(/[^0-9.]/g, "");
-    const updatedRanges = [...inventorySettings.priceRanges];
-    updatedRanges[index] = {
-      ...updatedRanges[index],
-      [field]: numericValue,
-    };
-
     setInventorySettings((prev) => ({
       ...prev,
-      priceRanges: updatedRanges,
+      priceRanges: prev.priceRanges.map((range, i) =>
+        i === index ? { ...range, [field]: numericValue } : range
+      ),
     }));
   };
 
   const removeInventoryRange = (index) => {
-    if (inventorySettings.priceRanges.length > 1) {
-      const updatedRanges = inventorySettings.priceRanges.filter((_, i) => i !== index);
-
-      if (index === inventorySettings.priceRanges.length - 1) {
-        const newLastIndex = updatedRanges.length - 1;
-        updatedRanges[newLastIndex] = {
-          ...updatedRanges[newLastIndex],
-          to: "MAX",
-        };
-      }
-
-      setInventorySettings((prev) => ({
-        ...prev,
-        priceRanges: updatedRanges,
-      }));
-    }
+    setInventorySettings((prev) => ({
+      ...prev,
+      priceRanges: prev.priceRanges.filter((_, i) => i !== index),
+    }));
   };
 
   // Navigation Handlers
   const goToNextStep = () => {
     if (activeStep === "store-info") {
+      if (!storeInfo.storeName || !storeInfo.marketplace) {
+        toast.error("Please fill in all required fields");
+        return;
+      }
       setActiveStep("price-settings");
     } else if (activeStep === "price-settings") {
       setActiveStep("inventory-settings");
@@ -198,35 +187,35 @@ export default function CreateStoreForm() {
     }
   };
 
-  const handleSubmit = () => {
-    const formData = {
-      storeInfo,
-      priceSettings,
-      inventorySettings,
-    };
+  const handleSubmit = async () => {
+    try {
+      setLoading(true);
+      
+      // Validate required fields
+      if (!storeInfo.storeName || !storeInfo.marketplace) {
+        toast.error("Please fill in all required fields");
+        return;
+      }
 
-    // Get existing stores from localStorage
-    const existingStores = JSON.parse(localStorage.getItem('stores') || '[]');
-    
-    if (isEditMode && storeId !== null) {
-      // Update existing store
-      const updatedStores = existingStores.map(store => 
-        store.id === storeId ? { id: storeId, ...formData, active: store.active } : store
-      );
-      localStorage.setItem('stores', JSON.stringify(updatedStores));
-      toast.success("Store updated successfully");
-    } else {
-      // Create new store
-      const newStore = {
-        id: Date.now(), // Use timestamp as simple ID
-        ...formData,
-        active: true // New stores are active by default
-      };
-      localStorage.setItem('stores', JSON.stringify([...existingStores, newStore]));
-      toast.success("Store created successfully");
+      const storeData = transformStoreDataForAPI(storeInfo, priceSettings, inventorySettings);
+      
+      if (isEditMode && storeId !== null) {
+        // Update existing store
+        await marketplaceAPI.updateStore(storeId, storeData);
+        toast.success("Store updated successfully");
+      } else {
+        // Create new store
+        await marketplaceAPI.createStore(storeData);
+        toast.success("Store created successfully");
+      }
+
+      navigate("/settings");
+    } catch (err) {
+      console.error('Error saving store:', err);
+      toast.error(isEditMode ? 'Failed to update store' : 'Failed to create store');
+    } finally {
+      setLoading(false);
     }
-
-    navigate("/settings");
   };
 
   return (
@@ -269,7 +258,7 @@ export default function CreateStoreForm() {
                   </SelectTrigger>
                   <SelectContent>
                     {marketplaces.map((mp) => (
-                      <SelectItem key={mp.id} value={mp.id}>
+                      <SelectItem key={mp.id} value={mp.id.toString()}>
                         {mp.name}
                       </SelectItem>
                     ))}
@@ -287,107 +276,112 @@ export default function CreateStoreForm() {
 
         {/* Price Settings */}
         <TabsContent value="price-settings" className="space-y-6">
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="purchaseTax">Purchase Tax (%)</Label>
-                <Input
-                  id="purchaseTax"
-                  placeholder="Enter purchase tax"
-                  value={priceSettings.purchaseTax}
-                  onChange={(e) => updatePriceSettings("purchaseTax", e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="marketplaceFees">Marketplace Fees (%)</Label>
-                <Input
-                  id="marketplaceFees"
-                  placeholder="Enter marketplace fees"
-                  value={priceSettings.marketplaceFees}
-                  onChange={(e) => updatePriceSettings("marketplaceFees", e.target.value)}
-                />
-              </div>
-            </div>
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Price Settings</h2>
 
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold">Price Ranges</h2>
+            <div className="border rounded-md p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="purchaseTax">Purchase Tax (%)</Label>
+                  <Input
+                    id="purchaseTax"
+                    placeholder="Enter purchase tax"
+                    value={priceSettings.purchaseTax}
+                    onChange={(e) => updatePriceSettings("purchaseTax", e.target.value)}
+                  />
+                </div>
 
-              <div className="border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead>Margin (%)</TableHead>
-                      <TableHead>Minimum Margin</TableHead>
-                      <TableHead>Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {priceSettings.priceRanges.map((range, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="p-0">
-                          <Input
-                            type="text"
-                            value={range.from}
-                            onChange={(e) => updatePriceRange(index, "from", e.target.value)}
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                            placeholder="0"
-                          />
-                        </TableCell>
-                        <TableCell className="p-0">
-                          {index === priceSettings.priceRanges.length - 1 ? (
-                            <Input
-                              value="MAX"
-                              readOnly
-                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-muted"
-                            />
-                          ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="marketplaceFees">Marketplace Fees (%)</Label>
+                  <Input
+                    id="marketplaceFees"
+                    placeholder="Enter marketplace fees"
+                    value={priceSettings.marketplaceFees}
+                    onChange={(e) => updatePriceSettings("marketplaceFees", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Price Ranges</h3>
+
+                <div className="border rounded-md">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>From</TableHead>
+                        <TableHead>To</TableHead>
+                        <TableHead>Margin (%)</TableHead>
+                        <TableHead>Minimum Margin</TableHead>
+                        <TableHead>Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {priceSettings.priceRanges.map((range, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="p-0">
                             <Input
                               type="text"
-                              value={range.to}
-                              onChange={(e) => updatePriceRange(index, "to", e.target.value)}
+                              value={range.from}
+                              onChange={(e) => updatePriceRange(index, "from", e.target.value)}
                               className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                              placeholder="100"
+                              placeholder="0"
                             />
-                          )}
-                        </TableCell>
-                        <TableCell className="p-0">
-                          <Input
-                            type="text"
-                            value={range.margin}
-                            onChange={(e) => updatePriceRange(index, "margin", e.target.value)}
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                            placeholder="30"
-                          />
-                        </TableCell>
-                        <TableCell className="p-0">
-                          <Input
-                            type="text"
-                            value={range.minimumMargin}
-                            onChange={(e) => updatePriceRange(index, "minimumMargin", e.target.value)}
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                            placeholder="25"
-                          />
-                        </TableCell>
-                        <TableCell className="p-0">
-                          <div className="flex gap-2">
-                            {priceSettings.priceRanges.length > 1 && (
-                              <Button onClick={() => removePriceRange(index)} variant="ghost" className="p-2">
-                                <Trash2 className="w-4 h-4 text-red-500" />
-                              </Button>
+                          </TableCell>
+                          <TableCell className="p-0">
+                            {index === priceSettings.priceRanges.length - 1 ? (
+                              <Input
+                                value="MAX"
+                                readOnly
+                                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-muted"
+                              />
+                            ) : (
+                              <Input
+                                type="text"
+                                value={range.to}
+                                onChange={(e) => updatePriceRange(index, "to", e.target.value)}
+                                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                                placeholder="100"
+                              />
                             )}
-                            {index === priceSettings.priceRanges.length - 1 && (
-                              <Button onClick={addPriceRange} variant="ghost" className="p-2">
-                                <Plus className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          </TableCell>
+                          <TableCell className="p-0">
+                            <Input
+                              type="text"
+                              value={range.margin}
+                              onChange={(e) => updatePriceRange(index, "margin", e.target.value)}
+                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              placeholder="30"
+                            />
+                          </TableCell>
+                          <TableCell className="p-0">
+                            <Input
+                              type="text"
+                              value={range.minimumMargin}
+                              onChange={(e) => updatePriceRange(index, "minimumMargin", e.target.value)}
+                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              placeholder="25"
+                            />
+                          </TableCell>
+                          <TableCell className="p-0">
+                            <div className="flex gap-2">
+                              {priceSettings.priceRanges.length > 1 && (
+                                <Button onClick={() => removePriceRange(index)} variant="ghost" className="p-2">
+                                  <Trash2 className="w-4 h-4 text-red-500" />
+                                </Button>
+                              )}
+                              {index === priceSettings.priceRanges.length - 1 && (
+                                <Button onClick={addPriceRange} variant="ghost" className="p-2">
+                                  <Plus className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             </div>
           </div>
@@ -474,7 +468,9 @@ export default function CreateStoreForm() {
 
           <div className="flex justify-end gap-4">
             <Button variant="outline" onClick={goToPreviousStep}>Back</Button>
-            <Button onClick={handleSubmit}>Create Store</Button>
+            <Button onClick={handleSubmit} disabled={loading}>
+              {loading ? 'Saving...' : (isEditMode ? 'Update Store' : 'Create Store')}
+            </Button>
           </div>
         </TabsContent>
       </Tabs>
