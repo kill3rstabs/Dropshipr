@@ -45,12 +45,12 @@ services:
       - django_media:/app/media
     labels:
       - traefik.enable=true
-      - traefik.http.routers.dropshipr.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.dropshipr.rule=Host(`${`autoecomm.wesolucions.com`}`)
       - traefik.http.routers.dropshipr.entrypoints=websecure
       - traefik.http.routers.dropshipr.tls.certresolver=le
       - traefik.http.services.dropshipr.loadbalancer.server.port=8000
       # redirect http → https
-      - traefik.http.routers.dropshipr-web.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.dropshipr-web.rule=Host(`${`autoecomm.wesolucions.com`}`)
       - traefik.http.routers.dropshipr-web.entrypoints=web
       - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
       - traefik.http.routers.dropshipr-web.middlewares=redirect-to-https
@@ -66,7 +66,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.n8n.rule=Host(`autoecom.wesolucions.com`)"
       - "traefik.http.routers.n8n.entrypoints=websecure"
-      - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.n8n.tls.certresolver=myresolver"
     networks: [web]
 
   watchtower:
