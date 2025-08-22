@@ -3,11 +3,9 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { VitePWA } from 'vite-plugin-pwa'
 
-// https://vitejs.dev/config/
-
 export default defineConfig({
-  plugins: [react()],
-  base: '/Dropshipr/',
+  plugins: [react(), VitePWA()],
+  base: '/static/',   // ✅ tells Vite to serve assets under /static/
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
@@ -25,6 +23,6 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 3000 // change here
+    port: 3000
   },
 })
