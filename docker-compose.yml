@@ -44,16 +44,17 @@ services:
     volumes:
       - django_media:/app/media
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.dropshipr.rule=Host(`${`autoecomm.wesolucions.com`}`)
-      - traefik.http.routers.dropshipr.entrypoints=websecure
-      - traefik.http.routers.dropshipr.tls.certresolver=le
-      - traefik.http.services.dropshipr.loadbalancer.server.port=8000
+      - "traefik.enable=true"
+      - "traefik.http.routers.dropshipr.rule=Host(${APP_DOMAIN})"
+      - "traefik.http.routers.dropshipr.entrypoints=websecure"
+      - "traefik.http.routers.dropshipr.tls.certresolver=le"
+      - "traefik.http.services.dropshipr.loadbalancer.server.port=8000"
+
       # redirect http → https
-      - traefik.http.routers.dropshipr-web.rule=Host(`${`autoecomm.wesolucions.com`}`)
-      - traefik.http.routers.dropshipr-web.entrypoints=web
-      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
-      - traefik.http.routers.dropshipr-web.middlewares=redirect-to-https
+      - "traefik.http.routers.dropshipr-web.rule=Host(${APP_DOMAIN})"
+      - "traefik.http.routers.dropshipr-web.entrypoints=web"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.dropshipr-web.middlewares=redirect-to-https"
     networks: [web]
 
   n8n:
@@ -64,9 +65,9 @@ services:
       - n8n_data:/home/node/.n8n
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.n8n.rule=Host(`autoecom.wesolucions.com`)"
+      - "traefik.http.routers.n8n.rule=Host(${N8N_DOMAIN})"
       - "traefik.http.routers.n8n.entrypoints=websecure"
-      - "traefik.http.routers.n8n.tls.certresolver=myresolver"
+      - "traefik.http.routers.n8n.tls.certresolver=le"
     networks: [web]
 
   watchtower:
