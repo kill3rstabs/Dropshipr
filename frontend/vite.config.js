@@ -6,8 +6,18 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://vitejs.dev/config/
 
 export default defineConfig({
-  plugins: [react(),],
+  plugins: [react()],
   base: '/Dropshipr/',
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -17,5 +27,4 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000 // change here
   },
-
 })

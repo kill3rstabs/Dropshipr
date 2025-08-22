@@ -19,8 +19,27 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from .api import api
+from django.urls import path, re_path
+from django.views.generic import TemplateView
+from django.conf import settings
+from django.conf.urls.static import static
+# from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', api.urls),
+]
+
+# Serve static files - this MUST come before the catch-all routes
+# urlpatterns += staticfiles_urlpatterns()
+
+# # Serve React app for /Dropshipr/ path
+# urlpatterns += [
+#     re_path(r"^Dropshipr/.*$", TemplateView.as_view(template_name="index.html")),
+#     re_path(r"^Dropshipr/$", TemplateView.as_view(template_name="index.html")),
+# ]
+
+# Catch-all → serve React's index.html for root path
+urlpatterns += [
+    re_path(r"^(?:.*)/?$", TemplateView.as_view(template_name="index.html")),
 ]

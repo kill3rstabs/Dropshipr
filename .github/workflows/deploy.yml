@@ -1,0 +1,63 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "."
+          target: "/opt/dropshipr"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd /opt/dropshipr
+
+            cat > .env << 'EOF'
+            APP_DOMAIN=${{ secrets.APP_DOMAIN }}
+            N8N_DOMAIN=${{ secrets.N8N_DOMAIN }}
+            LETS_ENCRYPT_EMAIL=${{ secrets.LETS_ENCRYPT_EMAIL }}
+
+            DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+            DJANGO_SETTINGS_MODULE=api.settings
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            ALLOWED_HOSTS=${{ secrets.APP_DOMAIN }}
+            CSRF_TRUSTED_ORIGINS=https://${{ secrets.APP_DOMAIN }}
+            DEBUG=0
+
+            N8N_HOST=${{ secrets.N8N_DOMAIN }}
+            N8N_PROTOCOL=https
+            N8N_PORT=5678
+            WEBHOOK_URL=https://${{ secrets.N8N_DOMAIN }}/
+            N8N_ENCRYPTION_KEY=${{ secrets.N8N_ENCRYPTION_KEY }}
+
+            TZ=${{ secrets.TZ }}
+            EOF
+
+            docker compose pull
+            docker compose build --pull web
+            docker compose up -d --remove-orphans
+            docker image prune -f

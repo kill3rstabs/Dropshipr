@@ -1,0 +1,80 @@
+version: "3.9"
+
+networks:
+  web:
+
+volumes:
+  letsencrypt: {}
+  n8n_data: {}
+  django_media: {}
+
+services:
+  traefik:
+    image: traefik:v2.11
+    container_name: traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.email=${LETS_ENCRYPT_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --api.dashboard=false
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks: [web]
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dropshipr_web
+    env_file: .env
+    working_dir: /app
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn api.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    volumes:
+      - django_media:/app/media
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dropshipr.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.dropshipr.entrypoints=websecure
+      - traefik.http.routers.dropshipr.tls.certresolver=le
+      - traefik.http.services.dropshipr.loadbalancer.server.port=8000
+      # redirect http → https
+      - traefik.http.routers.dropshipr-web.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.dropshipr-web.entrypoints=web
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.routers.dropshipr-web.middlewares=redirect-to-https
+    networks: [web]
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    env_file: .env
+    volumes:
+      - n8n_data:/home/node/.n8n
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`${N8N_DOMAIN}`)
+      - traefik.http.routers.n8n.entrypoints=websecure
+      - traefik.http.routers.n8n.tls.certresolver=le
+      - traefik.http.services.n8n.loadbalancer.server.port=5678
+      - com.centurylinklabs.watchtower.enable=true
+    networks: [web]
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    command: --interval 3600 --cleanup --label-enable --include-restarting
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [web]
