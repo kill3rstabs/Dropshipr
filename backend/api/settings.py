@@ -71,8 +71,7 @@ ROOT_URLCONF = "api.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        # React build output (for index.html)
-        "DIRS": [BASE_DIR / "reactapp" / "static" / "dist"],
+        "DIRS": [BASE_DIR / "react_static"],  # React index.html lives here
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -114,9 +113,10 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (Django + React)
+# Static files (Django + React)
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [
-    BASE_DIR / "reactapp" / "static" / "dist",  # React build assets
+    BASE_DIR / "react_static",   # point to React assets
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
