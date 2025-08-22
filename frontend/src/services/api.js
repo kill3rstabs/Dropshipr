@@ -1,4 +1,4 @@
-const API_BASE_URL = '/api';
+import { API_BASE_URL } from '../lib/constants';
 
 // Helper function for API calls
 const apiCall = async (endpoint, options = {}) => {
