@@ -135,13 +135,19 @@ Thumbs.db
 # Logs
 logs/
 *.log
-
+gunicorn.exe
 # Runtime data
 pids/
 *.pid
 *.seed
 *.pid.lock
-
+*.xlsx
+*.csv
+*.json
+*.pdf
+*.docx
+*.doc
+frontend/src/lib/constants.js
 # Coverage directory used by tools like istanbul
 coverage/
 

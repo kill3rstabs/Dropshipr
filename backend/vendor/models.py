@@ -16,7 +16,7 @@ class VendorPrice(models.Model):
     Replaces the Postgres UNIQUE index on scrapes(product_id).
     """
     product = models.OneToOneField('products.Product', on_delete=models.CASCADE, related_name="latest_price")
-    price_cents = models.PositiveIntegerField(null=True, blank=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     stock = models.IntegerField(null=True, blank=True)
     error_code = models.CharField(max_length=50, blank=True)
     scraped_at = models.DateTimeField(default=timezone.now)
