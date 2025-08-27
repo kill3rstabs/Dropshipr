@@ -27,6 +27,7 @@ export default function CreateStoreForm() {
   const [storeInfo, setStoreInfo] = useState({
     storeName: "",
     marketplace: "",
+    apiKey: "",
   });
 
   // Price Settings State
@@ -169,7 +170,7 @@ export default function CreateStoreForm() {
   // Navigation Handlers
   const goToNextStep = () => {
     if (activeStep === "store-info") {
-      if (!storeInfo.storeName || !storeInfo.marketplace) {
+      if (!storeInfo.storeName || !storeInfo.marketplace || !storeInfo.apiKey) {
         toast.error("Please fill in all required fields");
         return;
       }
@@ -192,7 +193,7 @@ export default function CreateStoreForm() {
       setLoading(true);
       
       // Validate required fields
-      if (!storeInfo.storeName || !storeInfo.marketplace) {
+      if (!storeInfo.storeName || !storeInfo.marketplace || !storeInfo.apiKey) {
         toast.error("Please fill in all required fields");
         return;
       }
@@ -264,6 +265,20 @@ export default function CreateStoreForm() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="apiKey">API Key</Label>
+                <Input
+                  id="apiKey"
+                  type="password"
+                  placeholder="Enter your marketplace API key"
+                  value={storeInfo.apiKey}
+                  onChange={(e) => updateStoreInfo("apiKey", e.target.value)}
+                />
+                <p className="text-sm text-gray-500">
+                  Your API key will be encrypted and stored securely
+                </p>
               </div>
             </div>
           </div>
