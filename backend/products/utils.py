@@ -316,6 +316,7 @@ def ingest_upload(upload_id):
                     store=store,
                     defaults={
                         'marketplace_parent_sku': str(row.get('marketplace_parent_sku', '')).strip(),
+                        'marketplace_external_id': str(row.get('marketplace_id', '') or '').strip(),
                         'upload': upload,  # 🆕 Track which upload created this product
                     }
                 )

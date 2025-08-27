@@ -41,6 +41,12 @@ class Product(models.Model):
         blank=True,
         help_text="Marketplace-specific parent SKU"
     )
+    marketplace_external_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="External ID provided by the marketplace (eBay ID, Amazon ASIN, etc.)"
+    )
     marketplace = models.ForeignKey(
         'marketplace.Marketplace',
         on_delete=models.CASCADE,

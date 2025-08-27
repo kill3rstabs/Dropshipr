@@ -724,7 +724,7 @@ def export_products(request):
                 product.store.name if product.store else '',
                 product.marketplace_parent_sku or '',
                 product.marketplace_child_sku or '',
-                ''  # Marketplace ID - not stored in our model
+                product.marketplace_external_id or ''  # External marketplace ID
             ]
             writer.writerow(row)
         
