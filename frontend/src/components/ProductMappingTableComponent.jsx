@@ -16,6 +16,9 @@ const ProductMappingTable = () => {
   const [selectedTemplate, setSelectedTemplate] = useState('upload')
   const [dragOver, setDragOver] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
+  
+  // Export loading state
+  const [isExporting, setIsExporting] = useState(false)
 
   // Fetch uploads on component mount
   useEffect(() => {
@@ -107,6 +110,9 @@ const ProductMappingTable = () => {
   // Download current products function
   const downloadCurrentProducts = async () => {
     try {
+      setIsExporting(true)
+      setError(null) // Clear any previous errors
+      
       const response = await fetch(`${API_BASE_URL}/products/export/`)
       
       if (response.ok) {
@@ -119,12 +125,22 @@ const ProductMappingTable = () => {
         link.click()
         document.body.removeChild(link)
         URL.revokeObjectURL(url)
+        
+        // Show success message
+        setSuccess('Products exported successfully!')
       } else {
         setError('Failed to export products')
       }
     } catch (error) {
       console.error('Export error:', error)
       setError('Export failed. Please check your connection and try again.')
+    } finally {
+      setIsExporting(false)
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setSuccess(null)
+      }, 5000)
     }
   }
 
@@ -949,14 +965,29 @@ const ProductMappingTable = () => {
 
                 <button
                   onClick={downloadCurrentProducts}
-                  className="flex items-center p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-left"
+                  disabled={isExporting}
+                  className={`flex items-center p-3 border border-gray-300 rounded-lg transition-colors text-left ${
+                    isExporting 
+                      ? 'bg-gray-100 cursor-not-allowed' 
+                      : 'hover:bg-gray-50'
+                  }`}
                 >
-                  <svg className="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
+                  {isExporting ? (
+                    <svg className="w-5 h-5 text-green-500 mr-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-green-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  )}
                   <div>
-                    <div className="text-sm font-medium text-gray-900">Export Products</div>
-                    <div className="text-xs text-gray-500">All system products</div>
+                    <div className="text-sm font-medium text-gray-900">
+                      {isExporting ? 'Exporting...' : 'Export Products'}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {isExporting ? 'Please wait...' : 'All system products'}
+                    </div>
                   </div>
                 </button>
               </div>

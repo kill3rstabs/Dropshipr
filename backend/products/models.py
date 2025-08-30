@@ -173,12 +173,45 @@ class Scrape(models.Model):
         help_text="Complete raw response from scraping operation"
     )
 
+    # Raw scraped data for audit trail
+    raw_price = models.CharField(max_length=100, blank=True, help_text="Raw price text from scraping")
+    raw_shipping = models.CharField(max_length=200, blank=True, help_text="Raw shipping info from scraping")
+    raw_quantity = models.TextField(blank=True, help_text="Raw quantity info from scraping")
+    raw_handling_time = models.TextField(blank=True, help_text="Raw handling time info from scraping")
+    raw_seller_away = models.TextField(blank=True, help_text="Raw seller away info from scraping")
+    raw_ended_listings = models.TextField(blank=True, help_text="Raw ended listings info from scraping")
+    
+    # Calculated values
+    calculated_shipping_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, 
+        help_text="Calculated shipping price after business rules"
+    )
+    final_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Final price after business rules (price + shipping)"
+    )
+    final_inventory = models.IntegerField(
+        null=True, blank=True,
+        help_text="Final inventory after business rules"
+    )
+    
+    # Business logic flags
+    needs_rescrape = models.BooleanField(
+        default=False,
+        help_text="Whether this product needs to be rescraped"
+    )
+    error_details = models.TextField(
+        blank=True,
+        help_text="Detailed error information for debugging"
+    )
+
     class Meta:
         verbose_name = "Scrape"
         verbose_name_plural = "Scrapes"
         ordering = ['-scrape_time']
         indexes = [
             models.Index(fields=['product', '-scrape_time']),
+            models.Index(fields=['needs_rescrape']),  # For rescrape queries
         ]
 
     def __str__(self):

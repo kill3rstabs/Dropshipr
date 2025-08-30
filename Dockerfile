@@ -32,5 +32,6 @@ COPY --from=build /frontend/dist/ /app/react_static/
 
 EXPOSE 8000
 
-CMD ["gunicorn", "api.wsgi:application", "-b", "0.0.0.0:8000", "--workers", "3"]
+# Alternative approach - use Uvicorn directly:
+CMD ["gunicorn", "api.asgi:application", "-b", "0.0.0.0:8000", "--workers", "3", "--worker-class", "uvicorn.workers.UvicornWorker"]
   
