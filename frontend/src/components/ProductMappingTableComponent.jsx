@@ -19,11 +19,23 @@ const ProductMappingTable = () => {
   
   // Export loading state
   const [isExporting, setIsExporting] = useState(false)
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [pagination, setPagination] = useState({
+    current_page: 1,
+    page_size: 10,
+    total_count: 0,
+    total_pages: 0,
+    has_next: false,
+    has_prev: false
+  })
 
-  // Fetch uploads on component mount
+  // Fetch uploads on component mount and when pagination changes
   useEffect(() => {
     fetchUploads()
-  }, [])
+  }, [currentPage, pageSize])
 
   // Handle keyboard events and body scroll for modals
   useEffect(() => {
@@ -178,6 +190,7 @@ const ProductMappingTable = () => {
         setSuccess(`Bulk delete completed! ${result.deletedCount || 0} products deleted.`)
         // Refresh uploads to reflect changes
         setTimeout(() => {
+          setCurrentPage(1) // Reset to first page
           fetchUploads()
         }, 1000)
         
@@ -314,6 +327,7 @@ const ProductMappingTable = () => {
         
         // Refresh the uploads list to get updated data
         setTimeout(() => {
+          setCurrentPage(1) // Reset to first page
           fetchUploads()
         }, 1000)
         
@@ -350,11 +364,19 @@ const ProductMappingTable = () => {
 
   const fetchUploads = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/uploads/`)
+      const response = await fetch(`${API_BASE_URL}/products/uploads/?page=${currentPage}&page_size=${pageSize}`)
       const data = await response.json()
       
       if (data.success) {
         setUploads(data.uploads || [])
+        setPagination(data.pagination || {
+          current_page: 1,
+          page_size: 10,
+          total_count: 0,
+          total_pages: 0,
+          has_next: false,
+          has_prev: false
+        })
       } else {
         setError('Failed to fetch upload history')
       }
@@ -667,9 +689,88 @@ const ProductMappingTable = () => {
         </table>
       </div>
       
-      {uploads.length > 0 && (
-        <div className="mt-4 text-sm text-gray-600 text-center">
-          Showing {uploads.length} most recent uploads
+      {/* Pagination Controls */}
+      {pagination.total_count > 0 && (
+        <div className="mt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+          {/* Page Info */}
+          <div className="text-sm text-gray-600">
+            Showing {((pagination.current_page - 1) * pagination.page_size) + 1} to {Math.min(pagination.current_page * pagination.page_size, pagination.total_count)} of {pagination.total_count} uploads
+          </div>
+          
+          {/* Page Size Selector */}
+          <div className="flex items-center gap-2">
+            <label htmlFor="pageSize" className="text-sm text-gray-600">Show:</label>
+            <select
+              id="pageSize"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value))
+                setCurrentPage(1) // Reset to first page when changing page size
+              }}
+              className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+            <span className="text-sm text-gray-600">per page</span>
+          </div>
+          
+          {/* Pagination Buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(1)}
+              disabled={!pagination.has_prev}
+              className={`px-3 py-1 rounded text-sm ${
+                !pagination.has_prev
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              First
+            </button>
+            
+            <button
+              onClick={() => setCurrentPage(currentPage - 1)}
+              disabled={!pagination.has_prev}
+              className={`px-3 py-1 rounded text-sm ${
+                !pagination.has_prev
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Previous
+            </button>
+            
+            <span className="px-3 py-1 text-sm text-gray-700">
+              Page {pagination.current_page} of {pagination.total_pages}
+            </span>
+            
+            <button
+              onClick={() => setCurrentPage(currentPage + 1)}
+              disabled={!pagination.has_next}
+              className={`px-3 py-1 rounded text-sm ${
+                !pagination.has_next
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Next
+            </button>
+            
+            <button
+              onClick={() => setCurrentPage(pagination.total_pages)}
+              disabled={!pagination.has_next}
+              className={`px-3 py-1 rounded text-sm ${
+                !pagination.has_next
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Last
+            </button>
+          </div>
         </div>
       )}
 

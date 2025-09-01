@@ -769,12 +769,23 @@ def upload_file(request, file: UploadedFile = File(...)):
         }
 
 @router.get("/uploads/")
-def get_uploads(request):
+def get_uploads(request, page: int = 1, page_size: int = 10):
     """
-    Get all upload records with preserved status
+    Get upload records with pagination and preserved status
     """
     try:
-        uploads = Upload.objects.all().order_by('-id')[:50]  # Limit to last 50 uploads
+        # Validate pagination parameters
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)  # Max 100 items per page
+        
+        # Calculate offset
+        offset = (page - 1) * page_size
+        
+        # Get total count
+        total_count = Upload.objects.count()
+        
+        # Get paginated uploads
+        uploads = Upload.objects.all().order_by('-id')[offset:offset + page_size]
         
         results = []
         for upload in uploads:
@@ -867,7 +878,23 @@ def get_uploads(request):
                 "errorLogs": error_logs
             })
         
-        return {"success": True, "uploads": results}
+        # Calculate pagination metadata
+        total_pages = (total_count + page_size - 1) // page_size
+        has_next = page < total_pages
+        has_prev = page > 1
+        
+        return {
+            "success": True, 
+            "uploads": results,
+            "pagination": {
+                "current_page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": has_next,
+                "has_prev": has_prev
+            }
+        }
         
     except Exception as e:
         return {"success": False, "error": str(e), "uploads": []}
