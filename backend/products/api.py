@@ -33,6 +33,9 @@ from django.db import transaction
 from django.db.models import Q
 import pytz
 from asgiref.sync import sync_to_async
+import threading
+from openpyxl import load_workbook
+from django.db import close_old_connections
 
 router = Router()
 
@@ -78,7 +81,7 @@ def get_rescrape_products():
     return list(Product.objects.filter(
         vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS,
         scrapes__needs_rescrape=True
-    ).distinct())
+    ))
 
 @sync_to_async
 def get_products_by_ids(product_ids):
@@ -429,6 +432,119 @@ def create_error_log_excel(results: List[Dict[str, Any]], session_id: str) -> st
         logger.error(f"Error creating error log: {e}")
         return ""
 
+def _quick_file_info(file_path: str, file_extension: str):
+    """Fast row count and first-row metadata without loading entire dataset"""
+    vendor_name = "Unknown"
+    marketplace_name = "Unknown"
+    if file_extension == '.csv':
+        try:
+            with open(file_path, 'rb') as f:
+                total_lines = sum(1 for _ in f)
+            items_uploaded = max(total_lines - 1, 0)
+        except Exception:
+            items_uploaded = 0
+        try:
+            import csv as _csv
+            with open(file_path, 'r', encoding='utf-8', newline='') as f:
+                reader = _csv.DictReader(f)
+                first = next(reader, None)
+                if first:
+                    vendor_name = first.get('Vendor Name') or "Unknown"
+                    marketplace_name = first.get('Marketplace Name') or "Unknown"
+        except Exception:
+            pass
+        return items_uploaded, vendor_name, marketplace_name
+    else:
+        try:
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb.active
+            max_row = ws.max_row or 1
+            items_uploaded = max(max_row - 1, 0)
+            headers = [cell.value for cell in ws[1]]
+            second = [cell.value for cell in ws[2]] if max_row >= 2 else []
+            header_index = {h: i for i, h in enumerate(headers) if h}
+            if second:
+                if 'Vendor Name' in header_index:
+                    v = second[header_index['Vendor Name']]
+                    vendor_name = str(v) if v is not None else "Unknown"
+                if 'Marketplace Name' in header_index:
+                    m = second[header_index['Marketplace Name']]
+                    marketplace_name = str(m) if m is not None else "Unknown"
+        except Exception:
+            items_uploaded = 0
+        return items_uploaded, vendor_name, marketplace_name
+
+
+def _progress_file_path(upload_id: int) -> str:
+    uploads_dir = os.path.join("uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    return os.path.join(uploads_dir, f"progress_{upload_id}.json")
+
+
+def _read_progress(upload_id: int):
+    path = _progress_file_path(upload_id)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _process_upload_in_background(upload_id: int):
+    close_old_connections()
+    try:
+        logger.info(f"Starting background ingest for upload_id={upload_id}")
+        processed_count = ingest_upload(upload_id)
+
+        upload = Upload.objects.get(id=upload_id)
+        try:
+            info = json.loads(upload.note) if upload.note else {}
+        except Exception:
+            info = {}
+
+        info.update({
+            'status': 'completed',
+            'itemsAdded': processed_count,
+            'errorLogs': 'No errors',
+            'itemsProcessed': processed_count
+        })
+        upload.note = json.dumps(info)
+        upload.save(update_fields=['note'])
+        logger.info(f"Completed background ingest for upload_id={upload_id} itemsAdded={processed_count}")
+    except ValidationError as e:
+        upload = Upload.objects.filter(id=upload_id).first()
+        if upload:
+            try:
+                info = json.loads(upload.note) if upload.note else {}
+            except Exception:
+                info = {}
+            info.update({
+                'status': 'failed',
+                'itemsAdded': 0,
+                'errorLogs': str(e),
+                'errorType': e.error_type
+            })
+            upload.note = json.dumps(info)
+            upload.save(update_fields=['note'])
+        logger.exception(f"Validation error during background ingest upload_id={upload_id}: {e}")
+    except Exception as e:
+        upload = Upload.objects.filter(id=upload_id).first()
+        if upload:
+            try:
+                info = json.loads(upload.note) if upload.note else {}
+            except Exception:
+                info = {}
+            info.update({
+                'status': 'failed',
+                'itemsAdded': 0,
+                'errorLogs': str(e)
+            })
+            upload.note = json.dumps(info)
+            upload.save(update_fields=['note'])
+        logger.exception(f"Unexpected error during background ingest upload_id={upload_id}: {e}")
+    finally:
+        close_old_connections()
+
 @router.post("/upload/")
 def upload_file(request, file: UploadedFile = File(...)):
     """
@@ -466,19 +582,9 @@ def upload_file(request, file: UploadedFile = File(...)):
             expires_at=timezone.now() + timedelta(days=30)  # Keep for 30 days
         )
         
-        # Get basic file info for response
+        # Get basic file info for response (fast path)
         try:
-            if file_extension in ['.xlsx', '.xls']:
-                df = pd.read_excel(file_path)
-            else:
-                df = pd.read_csv(file_path)
-            
-            items_uploaded = len(df)
-            
-            # Get vendor and marketplace names from first row
-            vendor_name = df['Vendor Name'].iloc[0] if len(df) > 0 and 'Vendor Name' in df.columns else "Unknown"
-            marketplace_name = df['Marketplace Name'].iloc[0] if len(df) > 0 and 'Marketplace Name' in df.columns else "Unknown"
-            
+            items_uploaded, vendor_name, marketplace_name = _quick_file_info(file_path, file_extension)
         except Exception as e:
             # Clean up uploaded file if we can't parse it
             if os.path.exists(file_path):
@@ -490,50 +596,28 @@ def upload_file(request, file: UploadedFile = File(...)):
                 "errorType": "FILE_PARSING_ERROR"
             }
         
-        # Process the file with comprehensive validation
-        try:
-            processed_count = ingest_upload(upload.id)
-            status = "uploaded"  # File uploaded successfully, but scraping not done yet
-            error_logs = "No errors"
-            items_added = processed_count
-            
-        except ValidationError as e:
-            # Clean up uploaded file and database record for validation failures
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            upload.delete()
-            
-            # Return structured error response for frontend
-            return {
-                "success": False,
-                "error": str(e),
-                "errorType": e.error_type,
-                "details": {
-                    "fileName": file.name,
-                    "itemsFound": items_uploaded,
-                    "vendorName": vendor_name,
-                    "marketplace": marketplace_name
-                }
-            }
-            
-        except Exception as e:
-            # For unexpected errors, keep the file for debugging but mark as failed
-            status = "failed"
-            error_logs = str(e)
-            items_added = 0
-        
-        # Store the status information for future requests (preserve status)
+        # Initialize status and persist for polling
         status_info = {
-            'status': status,
+            'status': 'processing',
             'vendorName': vendor_name,
             'marketplace': marketplace_name,
             'itemsUploaded': items_uploaded,
-            'itemsAdded': items_added,
-            'errorLogs': error_logs
+            'itemsAdded': 0,
+            'errorLogs': 'Processing',
+            'itemsProcessed': 0,
+            'totalItems': items_uploaded
         }
         upload.note = json.dumps(status_info)
-        upload.save()
-        
+        upload.save(update_fields=['note'])
+
+        # Fire-and-forget background processing
+        threading.Thread(
+            target=_process_upload_in_background,
+            args=(upload.id,),
+            daemon=True,
+        ).start()
+        logger.info(f"Spawned background ingest thread for upload_id={upload.id}")
+
         return {
             "success": True,
             "upload_id": upload.id,
@@ -542,9 +626,9 @@ def upload_file(request, file: UploadedFile = File(...)):
             "vendorName": vendor_name,
             "marketplace": marketplace_name,
             "itemsUploaded": items_uploaded,
-            "itemsAdded": items_added,
-            "status": status,
-            "errorLogs": error_logs
+            "itemsAdded": 0,
+            "status": "processing",
+            "errorLogs": "Processing"
         }
         
     except Exception as e:
@@ -1935,4 +2019,37 @@ async def get_n8n_webhook_status(request):
         "timeout": N8N_WEBHOOK_TIMEOUT,
         "enabled": bool(N8N_WEBHOOK_URL and N8N_WEBHOOK_URL != 'https://autoecom.wesolucions.com/webhook-test/ebayau-rescrape'),
         "environment_variable": "N8N_WEBHOOK_URL"
+    }
+
+@router.get("/upload/{upload_id}")
+def get_upload_status(request, upload_id: int):
+    """Get status and progress for a single upload"""
+    upload = get_object_or_404(Upload, id=upload_id)
+    info = {}
+    if upload.note:
+        try:
+            info = json.loads(upload.note)
+        except Exception:
+            info = {}
+    # If processing, augment with file-based progress if available
+    if info.get('status') == 'processing':
+        p = _read_progress(upload_id)
+        if p:
+            info['itemsProcessed'] = p.get('itemsProcessed', info.get('itemsProcessed', 0))
+            info['totalItems'] = p.get('totalItems', info.get('totalItems', info.get('itemsUploaded', 0)))
+    return {
+        "success": True,
+        "upload": {
+            "id": upload.id,
+            "date": upload.expires_at.strftime("%Y-%m-%d"),
+            "userName": "System",
+            "vendorName": info.get("vendorName", "Unknown"),
+            "marketplace": info.get("marketplace", "Unknown"),
+            "itemsUploaded": info.get("itemsUploaded", 0),
+            "itemsAdded": info.get("itemsAdded", 0),
+            "status": info.get("status", "pending"),
+            "errorLogs": info.get("errorLogs", ""),
+            "itemsProcessed": info.get("itemsProcessed", 0),
+            "totalItems": info.get("totalItems", info.get("itemsUploaded", 0)),
+        }
     }

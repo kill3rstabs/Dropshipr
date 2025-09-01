@@ -104,31 +104,22 @@ class Product(models.Model):
     
     
 class Upload(models.Model):
-    """
-    Represents a file upload session for bulk product imports.
-    
-    This model tracks uploaded files and their metadata for audit purposes.
-    """
-    original_name = models.CharField(
-        max_length=255,
-        help_text="Original filename as uploaded by user"
-    )
-    stored_key = models.CharField(
-        max_length=255,
-        help_text="Path where the file is stored on disk"
-    )
-    note = models.TextField(
-        blank=True,
-        help_text="Optional notes about this upload"
-    )
-    expires_at = models.DateTimeField(
-        default=timezone.now,
-        help_text="When this upload record expires"
-    )
+    id = models.BigAutoField(primary_key=True)
+    original_name = models.CharField(max_length=255)
+    stored_key = models.CharField(max_length=255)
+    note = models.TextField()
+    expires_at = models.DateTimeField()
+    completed_at = models.DateTimeField(blank=True, null=True)
+    error_message = models.TextField(blank=True, null=True)
+    job_id = models.CharField(unique=True, max_length=255, blank=True, null=True)
+    processed_count = models.IntegerField(blank=True, null=True)
+    status = models.CharField(max_length=20, blank=True, null=True)
+    progress_data = models.JSONField(max_length=20, blank=True, null=True)
 
     class Meta:
         verbose_name = "Upload"
         verbose_name_plural = "Uploads"
+        db_table = 'products_upload'
         ordering = ['-expires_at']
 
     def __str__(self):
