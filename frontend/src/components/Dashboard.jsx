@@ -119,12 +119,12 @@ export default function Dashboard() {
 
       {/* Main Content Grid */}
       <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-        {/* Total Items Uploaded Card */}
+        {/* Total Items Added Card */}
         <Card className="walmart-card">
           <CardHeader className="walmart-gradient text-white rounded-t-lg">
             <CardTitle className="flex items-center">
               <Package className="mr-2 h-5 w-5" />
-              Total Items Uploaded
+              Total Items Added
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">

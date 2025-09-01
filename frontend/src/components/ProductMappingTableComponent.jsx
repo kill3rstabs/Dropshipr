@@ -597,7 +597,6 @@ const ProductMappingTable = () => {
               <th className="py-3 px-4 text-left font-semibold">User Name</th>
               <th className="py-3 px-4 text-left font-semibold">Vendor Name</th>
               <th className="py-3 px-4 text-left font-semibold">Marketplace</th>
-              <th className="py-3 px-4 text-right font-semibold">Items Uploaded</th>
               <th className="py-3 px-4 text-right font-semibold">Items Added</th>
               <th className="py-3 px-4 text-left font-semibold">Status</th>
               <th className="py-3 px-4 text-left font-semibold">Error Logs</th>
@@ -607,7 +606,7 @@ const ProductMappingTable = () => {
           <tbody className="divide-y divide-gray-200">
             {uploads.length === 0 ? (
               <tr>
-                <td colSpan="9" className="py-8 px-4 text-center text-gray-500">
+                <td colSpan="8" className="py-8 px-4 text-center text-gray-500">
                   No uploads yet. Upload your first file to get started!
                 </td>
               </tr>
@@ -618,7 +617,6 @@ const ProductMappingTable = () => {
                   <td className="py-3 px-4">{row.userName}</td>
                   <td className="py-3 px-4 font-medium">{row.vendorName}</td>
                   <td className="py-3 px-4 font-medium">{row.marketplace}</td>
-                  <td className="py-3 px-4 text-right">{row.itemsUploaded}</td>
                   <td className="py-3 px-4 text-right font-semibold">{row.itemsAdded}</td>
                   <td className="py-3 px-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(row.status)}`}>
@@ -736,8 +734,8 @@ const ProductMappingTable = () => {
                     <span className="font-medium">{deleteModal.upload.marketplace}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Items:</span>
-                    <span className="font-medium">{deleteModal.upload.itemsUploaded} uploaded</span>
+                    <span>Items Added:</span>
+                    <span className="font-medium">{deleteModal.upload.itemsAdded}</span>
                   </div>
                 </div>
               </div>

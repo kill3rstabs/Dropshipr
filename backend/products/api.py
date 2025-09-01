@@ -36,6 +36,8 @@ from asgiref.sync import sync_to_async
 import threading
 from openpyxl import load_workbook
 from django.db import close_old_connections
+from django.template.loader import render_to_string
+import requests
 
 router = Router()
 
@@ -489,18 +491,112 @@ def _read_progress(upload_id: int):
     except Exception:
         return None
 
+# Email webhook configuration
+EMAIL_WEBHOOK_URL = os.getenv('EMAIL_WEBHOOK_URL', 'https://autoecom.wesolucions.com/webhook/send-email')
+EMAIL_WEBHOOK_TIMEOUT = 30  # seconds
+
+def send_upload_notification_email(upload_data: dict, recipient_email: str = None):
+    """
+    Send upload completion notification email using webhook API
+    
+    Args:
+        upload_data: Dictionary containing upload details
+        recipient_email: Email address to send to (optional)
+    """
+    try:
+        if not recipient_email:
+            # Default email - you can get this from user profile or settings
+            recipient_email = os.getenv('DEFAULT_NOTIFICATION_EMAIL', 'nashitnoorali78@gmail.com')
+        
+        # Read HTML template from file
+        template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'email_upload_complete.html')
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html_template = f.read()
+        
+        # Determine status section
+        status = upload_data.get('status', 'unknown').lower()
+        if status == 'completed':
+            status_section = '''
+        <div class="status-success">
+            <strong>✅ Success!</strong> Your file has been processed successfully.
+        </div>'''
+        else:
+            status_section = '''
+        <div class="status-failed">
+            <strong>❌ Failed!</strong> There was an issue processing your file.
+        </div>'''
+        
+        # Determine error section
+        error_logs = upload_data.get('error_logs', '')
+        if error_logs and error_logs != 'No errors':
+            error_section = f'''
+        <div class="error-logs">
+            <strong>Error Details:</strong><br>
+            {error_logs}
+        </div>'''
+        else:
+            error_section = ''
+        
+        # Replace placeholders
+        html_message = html_template.replace('{STATUS_SECTION}', status_section)
+        html_message = html_message.replace('{ERROR_SECTION}', error_section)
+        html_message = html_message.replace('{FILE_NAME}', upload_data.get('file_name', 'Unknown'))
+        html_message = html_message.replace('{UPLOAD_DATE}', upload_data.get('upload_date', 'Unknown'))
+        html_message = html_message.replace('{VENDOR_NAME}', upload_data.get('vendor_name', 'Unknown'))
+        html_message = html_message.replace('{MARKETPLACE_NAME}', upload_data.get('marketplace_name', 'Unknown'))
+        html_message = html_message.replace('{ITEMS_UPLOADED}', str(upload_data.get('items_uploaded', 0)))
+        html_message = html_message.replace('{ITEMS_ADDED}', str(upload_data.get('items_added', 0)))
+        html_message = html_message.replace('{STATUS}', status.title())
+        
+        # Prepare email payload
+        email_payload = {
+            "to": recipient_email,
+            "subject": f"Upload {upload_data.get('status', 'Complete').title()} - {upload_data.get('file_name', 'File')}",
+            "message": html_message
+        }
+        
+        # Send email via webhook
+        response = requests.post(
+            EMAIL_WEBHOOK_URL,
+            json=email_payload,
+            timeout=EMAIL_WEBHOOK_TIMEOUT,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"Upload notification email sent successfully to {recipient_email}")
+            return True
+        else:
+            logger.error(f"Failed to send email. Status: {response.status_code}, Response: {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.exception(f"Error sending upload notification email: {e}")
+        return False
 
 def _process_upload_in_background(upload_id: int):
     close_old_connections()
+    email_data = {}
+    
     try:
         logger.info(f"Starting background ingest for upload_id={upload_id}")
-        processed_count = ingest_upload(upload_id)
-
+        
+        # Get upload info for email
         upload = Upload.objects.get(id=upload_id)
         try:
             info = json.loads(upload.note) if upload.note else {}
         except Exception:
             info = {}
+        
+        email_data = {
+            'file_name': upload.original_name,
+            'upload_date': upload.expires_at.strftime("%Y-%m-%d %H:%M"),
+            'vendor_name': info.get('vendorName', 'Unknown'),
+            'marketplace_name': info.get('marketplace', 'Unknown'),
+            'items_uploaded': info.get('itemsUploaded', 0),
+        }
+        
+        processed_count = ingest_upload(upload_id)
 
         info.update({
             'status': 'completed',
@@ -510,7 +606,16 @@ def _process_upload_in_background(upload_id: int):
         })
         upload.note = json.dumps(info)
         upload.save(update_fields=['note'])
+        
+        # Update email data for success notification
+        email_data.update({
+            'items_added': processed_count,
+            'status': 'completed',
+            'error_logs': 'No errors'
+        })
+        
         logger.info(f"Completed background ingest for upload_id={upload_id} itemsAdded={processed_count}")
+        
     except ValidationError as e:
         upload = Upload.objects.filter(id=upload_id).first()
         if upload:
@@ -526,7 +631,16 @@ def _process_upload_in_background(upload_id: int):
             })
             upload.note = json.dumps(info)
             upload.save(update_fields=['note'])
+            
+            # Update email data for failure notification
+            email_data.update({
+                'items_added': 0,
+                'status': 'failed',
+                'error_logs': str(e)
+            })
+            
         logger.exception(f"Validation error during background ingest upload_id={upload_id}: {e}")
+        
     except Exception as e:
         upload = Upload.objects.filter(id=upload_id).first()
         if upload:
@@ -541,8 +655,24 @@ def _process_upload_in_background(upload_id: int):
             })
             upload.note = json.dumps(info)
             upload.save(update_fields=['note'])
+            
+            # Update email data for failure notification
+            email_data.update({
+                'items_added': 0,
+                'status': 'failed',
+                'error_logs': str(e)
+            })
+            
         logger.exception(f"Unexpected error during background ingest upload_id={upload_id}: {e}")
+        
     finally:
+        # Send notification email
+        if email_data:
+            try:
+                send_upload_notification_email(email_data)
+            except Exception as email_error:
+                logger.error(f"Failed to send notification email for upload_id={upload_id}: {email_error}")
+        
         close_old_connections()
 
 @router.post("/upload/")

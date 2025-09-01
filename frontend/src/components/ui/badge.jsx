@@ -62,7 +62,6 @@ const ProductMappingTable = () => {
               <th>User Name</th>
               <th>Vendor Name</th>
               <th>Marketplace</th>
-              <th>Items Uploaded</th>
               <th>Items Added</th>
               <th>Status</th>
               <th>Error Logs</th>
@@ -75,7 +74,6 @@ const ProductMappingTable = () => {
                 <td>{row.userName}</td>
                 <td>{row.vendorName}</td>
                 <td>{row.marketplace}</td>
-                <td className="text-right">{row.itemsUploaded}</td>
                 <td className="text-right">{row.itemsAdded}</td>
                 <td>
                   <span className={`badge ${getStatusClass(row.status)}`}>{row.status}</span>
