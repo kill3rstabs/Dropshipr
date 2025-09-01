@@ -38,6 +38,8 @@ from openpyxl import load_workbook
 from django.db import close_old_connections
 import requests
 import io
+import subprocess
+import sys
 
 router = Router()
 
@@ -2284,6 +2286,21 @@ async def scrape_products(request):
             "products_queued": 0
         }
 
+def start_detached_scrape(session_id: str) -> str:
+    """Start the eBayAU scraping job as a detached subprocess and return log file path."""
+    uploads_dir = os.path.join("uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    log_path = os.path.join(uploads_dir, f"scrape_{session_id}.log")
+    with open(log_path, "ab", buffering=0) as lf:
+        subprocess.Popen(
+            [sys.executable, "manage.py", "scrape_ebayau_job", "--session", session_id],
+            cwd=os.getcwd(),
+            stdout=lf,
+            stderr=lf,
+            start_new_session=True
+        )
+    return log_path
+
 @router.post("/scrape-ebayau/")
 async def scrape_ebayau_products(request):
     """
@@ -2311,37 +2328,29 @@ async def scrape_ebayau_products(request):
                 "products_queued": 0
             }
         
-        # Start eBayAU scraping job
+        # Start eBayAU scraping job as detached process
         logger.info(f"Starting eBayAU scraping job with session ID: {session_id}")
-        asyncio.create_task(run_ebayau_scraping_job(session_id))
-        logger.info("eBayAU scraping job task created successfully")
+        log_path = start_detached_scrape(session_id)
+        logger.info("eBayAU scraping job subprocess started successfully")
         
         estimated_duration = f"{total_products * 6 // 60} minutes"
         logger.info(f"Estimated duration: {estimated_duration}")
         
-        response_data = {
+        return {
             "success": True,
             "message": "eBayAU scraping started successfully",
             "session_id": session_id,
             "products_queued": total_products,
             "estimated_duration": estimated_duration,
-            "status": "Scraping job started in background"
+            "status": "Scraping job started in background",
+            "log_file": log_path
         }
         
-        logger.info(f"API response: {response_data}")
-        logger.info("=== EBAYAU SCRAPING API ENDPOINT SUCCESS ===")
-        
-        return response_data
-        
     except Exception as e:
-        logger.error(f"=== EBAYAU SCRAPING API ENDPOINT ERROR ===")
-        logger.error(f"Error: {e}")
-        logger.error(f"Error type: {type(e)}")
-        logger.error("Error traceback: ", exc_info=True)
-        
+        logger.error(f"Error starting scraping job: {e}")
         return {
             "success": False,
-            "error": str(e),
+            "error": f"Failed to start scraping: {str(e)}",
             "products_queued": 0
         }
 
