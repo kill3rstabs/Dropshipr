@@ -13,7 +13,7 @@ import csv
 from datetime import datetime, timedelta
 from django.utils import timezone
 from .models import Upload, Product, Scrape
-from .utils import ingest_upload, ValidationError
+from .utils import ingest_upload, ValidationError, ingest_upload_parallel
 from .ebayau_rules import eBayAUBusinessRules
 from marketplace.models import Marketplace, Store
 from vendor.models import Vendor, VendorPrice
@@ -813,7 +813,8 @@ def _process_upload_in_background(upload_id: int):
             'items_uploaded': info.get('itemsUploaded', 0),
         }
         
-        processed_count = ingest_upload(upload_id)
+        # Use parallel ingestion for performance on large files
+        processed_count = ingest_upload_parallel(upload_id, workers=4, batch_size=500)
 
         info.update({
             'status': 'completed',

@@ -5,6 +5,9 @@ from openpyxl import load_workbook
 import pandas as pd
 import os
 import json
+import itertools
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from django.db import close_old_connections
 
 
 class ValidationError(Exception):
@@ -272,3 +275,179 @@ def ingest_upload(upload_id):
         pass
 
     return processed_count
+
+
+def ingest_upload_parallel(upload_id: int, workers: int = 4, batch_size: int = 500) -> int:
+    Upload = apps.get_model('products', 'Upload')
+    Vendor = apps.get_model('vendor', 'Vendor')
+    Marketplace = apps.get_model('marketplace', 'Marketplace')
+    Store = apps.get_model('marketplace', 'Store')
+    Product = apps.get_model('products', 'Product')
+    VendorPrice = apps.get_model('vendor', 'VendorPrice')
+
+    upload = Upload.objects.get(id=upload_id)
+
+    # Validate once
+    df = validate_upload_file(upload.stored_key)
+
+    # Normalize and map
+    df = df.rename(columns={
+        'Vendor Name': 'vendor_name', 'Vendor ID': 'vendor_id',
+        'Is Variation': 'is_variation', 'Variation ID': 'variation_id',
+        'Marketplace Name': 'marketplace_name', 'Store Name': 'store_name',
+        'Marketplace Parent SKU': 'marketplace_parent_sku',
+        'Marketplace Child SKU': 'marketplace_child_sku',
+        'Marketplace ID': 'marketplace_id'
+    })
+    for c in ['vendor_name','vendor_id','marketplace_name','store_name','marketplace_child_sku','marketplace_parent_sku','variation_id','marketplace_id']:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip().fillna('')
+
+    # Drop in-file duplicates by unique key
+    key_cols = ['marketplace_name','store_name','marketplace_child_sku']
+    df = df.drop_duplicates(subset=key_cols, keep='last')
+
+    # Prefetch maps
+    mp_names = set(df['marketplace_name'])
+    vendor_names = set(df['vendor_name'])
+    store_names = set(df['store_name'])
+
+    mp_map = {}
+    for mp in Marketplace.objects.filter(Q(code__in=mp_names) | Q(name__in=mp_names)):
+        mp_map[mp.code] = mp
+        mp_map[mp.name] = mp
+
+    store_map = {}
+    for mp in set(mp_map.values()):
+        for st in Store.objects.filter(marketplace=mp, name__in=store_names):
+            store_map[(st.name, mp.id)] = st
+
+    vendor_map = {}
+    for v in Vendor.objects.filter(Q(code__in=vendor_names) | Q(name__in=vendor_names)):
+        vendor_map[v.code] = v
+        vendor_map[v.name] = v
+
+    # Build items
+    items = []
+    for _, r in df.iterrows():
+        mp = mp_map.get(r['marketplace_name'])
+        if not mp: continue
+        st = store_map.get((r['store_name'], mp.id))
+        if not st: continue
+        ven = vendor_map.get(r['vendor_name'])
+        if not ven: continue
+
+        variation_id = ''
+        if str(r.get('is_variation','')).lower() in ['yes','true','1'] and r.get('variation_id'):
+            variation_id = str(r['variation_id']).strip()
+
+        items.append({
+            'marketplace_id': mp.id,
+            'store_id': st.id,
+            'child_sku': r['marketplace_child_sku'],
+            'vendor_id': ven.id,
+            'vendor_sku': r['vendor_id'],
+            'variation_id': variation_id,
+            'parent_sku': r.get('marketplace_parent_sku',''),
+            'external_id': r.get('marketplace_id','') or '',
+        })
+
+    total = len(items)
+    try:
+        _write_progress(upload_id, 0, total)
+    except Exception:
+        pass
+
+    def chunks(iterable, n):
+        it = iter(iterable)
+        while True:
+            batch = list(itertools.islice(it, n))
+            if not batch:
+                break
+            yield batch
+
+    def process_batch(batch):
+        close_old_connections()
+        Product = apps.get_model('products', 'Product')
+        VendorPrice = apps.get_model('vendor', 'VendorPrice')
+
+        keys = {(b['marketplace_id'], b['store_id'], b['child_sku']) for b in batch}
+        existing = Product.objects.filter(
+            marketplace_id__in=[k[0] for k in keys],
+            store_id__in=[k[1] for k in keys],
+            marketplace_child_sku__in=[k[2] for k in keys],
+        ).values('id','marketplace_id','store_id','marketplace_child_sku')
+        existing_map = {(e['marketplace_id'], e['store_id'], e['marketplace_child_sku']): e['id'] for e in existing}
+
+        to_update = []
+        to_create = []
+        for b in batch:
+            key = (b['marketplace_id'], b['store_id'], b['child_sku'])
+            if key in existing_map:
+                to_update.append(Product(
+                    id=existing_map[key],
+                    marketplace_id=b['marketplace_id'],
+                    store_id=b['store_id'],
+                    marketplace_child_sku=b['child_sku'],
+                    vendor_id=b['vendor_id'],
+                    vendor_sku=b['vendor_sku'],
+                    variation_id=b['variation_id'],
+                    marketplace_parent_sku=b['parent_sku'],
+                    marketplace_external_id=b['external_id'],
+                    upload_id=upload.id,
+                ))
+            else:
+                to_create.append(Product(
+                    marketplace_id=b['marketplace_id'],
+                    store_id=b['store_id'],
+                    marketplace_child_sku=b['child_sku'],
+                    vendor_id=b['vendor_id'],
+                    vendor_sku=b['vendor_sku'],
+                    variation_id=b['variation_id'],
+                    marketplace_parent_sku=b['parent_sku'],
+                    marketplace_external_id=b['external_id'],
+                    upload_id=upload.id,
+                ))
+
+        with transaction.atomic():
+            if to_create:
+                Product.objects.bulk_create(to_create, batch_size=batch_size, ignore_conflicts=True)
+            if to_update:
+                Product.objects.bulk_update(
+                    to_update,
+                    fields=['vendor_id','vendor_sku','variation_id','marketplace_parent_sku','marketplace_external_id','upload_id'],
+                    batch_size=batch_size
+                )
+            # ensure VendorPrice rows
+            ids_for_price = []
+            if to_create:
+                ids_for_price += list(Product.objects.filter(
+                    marketplace_id__in=[c.marketplace_id for c in to_create],
+                    store_id__in=[c.store_id for c in to_create],
+                    marketplace_child_sku__in=[c.marketplace_child_sku for c in to_create],
+                ).values_list('id', flat=True))
+            if to_update:
+                ids_for_price += [p.id for p in to_update]
+            if ids_for_price:
+                VendorPrice.objects.bulk_create(
+                    [VendorPrice(product_id=i) for i in ids_for_price],
+                    ignore_conflicts=True,
+                    batch_size=batch_size
+                )
+        return len(to_update) + len(to_create)
+
+    processed = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(process_batch, batch) for batch in chunks(items, batch_size)]
+        for fut in as_completed(futures):
+            processed += fut.result()
+            try:
+                _write_progress(upload_id, processed, total)
+            except Exception:
+                pass
+
+    try:
+        _write_progress(upload_id, processed, total)
+    except Exception:
+        pass
+    return processed
