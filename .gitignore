@@ -1,4 +1,6 @@
 # Logs
+backend/.venv/
+.venv/
 logs
 *.log
 npm-debug.log*
