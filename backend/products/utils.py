@@ -58,9 +58,50 @@ def validate_vendors_marketplaces_stores(df):
 
 
 def validate_sku_store_uniqueness(df):
-    """Validate SKU-store uniqueness constraints"""
-    # This function would check for duplicates and raise ValidationError
-    pass
+    """Reject duplicate (Store Name, Marketplace Name, Marketplace Child SKU)."""
+    # Normalize
+    for col in ['Store Name', 'Marketplace Name', 'Marketplace Child SKU']:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    key_cols = ['Store Name', 'Marketplace Name', 'Marketplace Child SKU']
+    if not all(c in df.columns for c in key_cols):
+        return  # structure validation will handle
+
+    # In-file duplicates
+    dup_mask = df.duplicated(subset=key_cols, keep=False)
+    if dup_mask.any():
+        bad = df.loc[dup_mask, key_cols].drop_duplicates().head(10).values.tolist()
+        samples = [" | ".join(x) for x in bad]
+        raise ValidationError(
+            f"Duplicate (Store, Marketplace, Child SKU) rows in file: {samples}{'...' if len(bad)==10 else ''}",
+            "DUPLICATE_SKU_STORE_IN_FILE"
+        )
+
+    # Against database
+    Marketplace = apps.get_model('marketplace', 'Marketplace')
+    Store = apps.get_model('marketplace', 'Store')
+    Product = apps.get_model('products', 'Product')
+
+    combos = df[key_cols].drop_duplicates().values.tolist()
+    errors = []
+    for store_name, marketplace_name, child_sku in combos:
+        mp = Marketplace.objects.filter(Q(code=marketplace_name) | Q(name=marketplace_name)).first()
+        if not mp:
+            continue
+        store = Store.objects.filter(name=store_name, marketplace=mp).first()
+        if not store:
+            continue
+        if Product.objects.filter(marketplace=mp, store=store, marketplace_child_sku=child_sku).exists():
+            errors.append(f"{store_name} | {marketplace_name} | {child_sku}")
+        if len(errors) >= 10:
+            break
+
+    if errors:
+        raise ValidationError(
+            f"(Store, Marketplace, Child SKU) already exists in DB: {errors}{'...' if len(errors)==10 else ''}",
+            "DUPLICATE_SKU_STORE_IN_DB"
+        )
 
 
 def validate_store_settings(df):
@@ -190,18 +231,18 @@ def ingest_upload(upload_id):
                     if 'variation_id' in row and pd.notna(row['variation_id']):
                         variation_id = str(row['variation_id']).strip()
                 
-                # Create or update product
+                # Create or update product using unique triple (marketplace, store, child_sku)
                 product, created = Product.objects.update_or_create(
-                    vendor=vendor,
-                    vendor_sku=str(row['vendor_id']).strip(),
-                    variation_id=variation_id,
-                    marketplace_child_sku=str(row['marketplace_child_sku']).strip(),
                     marketplace=marketplace,
                     store=store,
+                    marketplace_child_sku=str(row['marketplace_child_sku']).strip(),
                     defaults={
+                        'vendor': vendor,
+                        'vendor_sku': str(row['vendor_id']).strip(),
+                        'variation_id': variation_id,
                         'marketplace_parent_sku': str(row.get('marketplace_parent_sku', '')).strip(),
                         'marketplace_external_id': str(row.get('marketplace_id', '') or '').strip(),
-                        'upload': upload,  # 🆕 Track which upload created this product
+                        'upload': upload,
                     }
                 )
                 

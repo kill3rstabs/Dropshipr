@@ -71,9 +71,9 @@ class Product(models.Model):
     class Meta:
         verbose_name = "Product"
         verbose_name_plural = "Products"
-        # Ensure unique combination of key identifying fields
+        # Ensure unique combination of marketplace, store and child SKU
         unique_together = [
-            ['vendor', 'vendor_sku', 'marketplace', 'store', 'variation_id']
+            ['marketplace', 'store', 'marketplace_child_sku']
         ]
 
     def __str__(self):

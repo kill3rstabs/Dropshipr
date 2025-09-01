@@ -36,8 +36,8 @@ from asgiref.sync import sync_to_async
 import threading
 from openpyxl import load_workbook
 from django.db import close_old_connections
-from django.template.loader import render_to_string
 import requests
+import io
 
 router = Router()
 
@@ -322,10 +322,7 @@ def get_ebayau_seller_away(soup):
 def get_ebayau_shipping_info(soup):
     """Extract shipping information from eBayAU page."""
     shipping_element = soup.select_one(EBAYAU_SELECTORS['shipping'])
-    if shipping_element:
-        return shipping_element.get_text(strip=True)
-    else:
-        return "No shipping info"
+    return shipping_element.get_text(strip=True) if shipping_element else "No shipping info"
 
 def get_ebayau_handling_time(soup):
     """Extract handling time from eBayAU page source."""
@@ -494,6 +491,226 @@ def _read_progress(upload_id: int):
 # Email webhook configuration
 EMAIL_WEBHOOK_URL = os.getenv('EMAIL_WEBHOOK_URL', 'https://autoecom.wesolucions.com/webhook/send-email')
 EMAIL_WEBHOOK_TIMEOUT = 30  # seconds
+
+def generate_system_products_csv() -> str:
+    """
+    Generate system_products.csv file and return the file path
+    """
+    try:
+        # Get all products with related data including vendor prices
+        products = Product.objects.select_related('vendor', 'marketplace', 'store').prefetch_related('latest_price').all()
+        
+        # Create uploads directory if it doesn't exist
+        uploads_dir = os.path.join("uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        
+        # Generate unique filename with timestamp
+        timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = f"system_products_{timestamp}.csv"
+        csv_path = os.path.join(uploads_dir, csv_filename)
+        
+        # Write CSV file
+        with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            
+            # Write headers
+            headers = [
+                'Vendor Name',
+                'Vendor ID',
+                'Is Variation',
+                'Variation ID', 
+                'Marketplace Name',
+                'Store Name',
+                'Marketplace Parent SKU',
+                'Marketplace Child SKU',
+                'Marketplace ID',
+                'Vendor Price',
+                'Vendor Inventory'
+            ]
+            writer.writerow(headers)
+            
+            # Write product data
+            for product in products:
+                vendor_price = product.latest_price
+                
+                row = [
+                    product.vendor.name if product.vendor else '',
+                    product.vendor_sku or '',
+                    'Yes' if product.variation_id else 'No',
+                    product.variation_id or '',
+                    product.marketplace.name if product.marketplace else '',
+                    product.store.name if product.store else '',
+                    product.marketplace_parent_sku or '',
+                    product.marketplace_child_sku or '',
+                    product.marketplace_external_id or '',
+                    vendor_price.price if vendor_price and vendor_price.price else '',
+                    vendor_price.stock if vendor_price and vendor_price.stock else '0'
+                ]
+                writer.writerow(row)
+        
+        logger.info(f"Generated system products CSV: {csv_path}")
+        return csv_path
+        
+    except Exception as e:
+        logger.error(f"Error generating system products CSV: {e}")
+        return ""
+
+def build_system_products_csv_bytes() -> bytes:
+    """Generate the system products CSV in-memory (bytes), matching the /export endpoint."""
+    products = Product.objects.select_related('vendor', 'marketplace', 'store').prefetch_related('latest_price').all()
+    import io as _io
+    import csv as _csv
+    buffer = _io.StringIO()
+    writer = _csv.writer(buffer)
+    headers = [
+        'Vendor Name', 'Vendor ID', 'Is Variation', 'Variation ID',
+        'Marketplace Name', 'Store Name', 'Marketplace Parent SKU',
+        'Marketplace Child SKU', 'Marketplace ID', 'Vendor Price', 'Vendor Inventory'
+    ]
+    writer.writerow(headers)
+    for product in products:
+        vendor_price = product.latest_price
+        row = [
+            product.vendor.name if product.vendor else '',
+            product.vendor_sku or '',
+            'Yes' if product.variation_id else 'No',
+            product.variation_id or '',
+            product.marketplace.name if product.marketplace else '',
+            product.store.name if product.store else '',
+            product.marketplace_parent_sku or '',
+            product.marketplace_child_sku or '',
+            product.marketplace_external_id or '',
+            vendor_price.price if vendor_price and vendor_price.price else '',
+            vendor_price.stock if vendor_price and vendor_price.stock else '0',
+        ]
+        writer.writerow(row)
+    return buffer.getvalue().encode('utf-8')
+
+def send_scraping_complete_email(session_id: str, scraping_stats: dict, csv_file_path: str = None, recipient_email: str = None):
+    """
+    Send scraping completion notification email with CSV attachment.
+    Always send multipart/form-data with a 'data' file so n8n Gmail node receives a binary.
+    If no CSV exists on disk, attach a freshly generated in-memory CSV.
+    """
+    try:
+        if not recipient_email:
+            recipient_email = os.getenv('DEFAULT_NOTIFICATION_EMAIL', 'nashitnoorali78@gmail.com')
+        
+        # HTML email template for scraping completion
+        html_template = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scraping Complete - Dropshipr</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        .header { text-align: center; border-bottom: 3px solid #28a745; padding-bottom: 20px; margin-bottom: 30px; }
+        .logo { font-size: 28px; font-weight: bold; color: #28a745; margin-bottom: 10px; }
+        .status-success { background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745; margin: 20px 0; }
+        .details { background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0; }
+        .details h3 { margin-top: 0; color: #495057; }
+        .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #dee2e6; }
+        .detail-row:last-child { border-bottom: none; }
+        .detail-label { font-weight: 600; color: #6c757d; }
+        .detail-value { color: #495057; }
+        .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #6c757d; font-size: 14px; }
+        .attachment-info { background: #e7f3ff; border: 1px solid #b3d9ff; padding: 15px; border-radius: 5px; margin: 15px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">Dropshipr</div>
+            <h2>Scraping Job Complete</h2>
+        </div>
+
+        <div class="status-success">
+            <strong>Success!</strong> Your scraping job has been completed successfully.
+        </div>
+
+        <div class="details">
+            <h3>Scraping Statistics</h3>
+            <div class="detail-row"><span class="detail-label">Session ID:</span><span class="detail-value">{SESSION_ID}</span></div>
+            <div class="detail-row"><span class="detail-label">Total Products:</span><span class="detail-value">{TOTAL_PRODUCTS}</span></div>
+            <div class="detail-row"><span class="detail-label">Successful Scrapes:</span><span class="detail-value">{SUCCESSFUL_SCRAPES}</span></div>
+            <div class="detail-row"><span class="detail-label">Failed Scrapes:</span><span class="detail-value">{FAILED_SCRAPES}</span></div>
+            <div class="detail-row"><span class="detail-label">Success Rate:</span><span class="detail-value">{SUCCESS_RATE}%</span></div>
+            <div class="detail-row"><span class="detail-label">Duration:</span><span class="detail-value">{DURATION}</span></div>
+        </div>
+
+        {ATTACHMENT_SECTION}
+
+        <div class="footer"><p>This is an automated notification from Dropshipr.</p><p>If you have any questions, please contact support.</p></div>
+    </div>
+</body>
+</html>
+        """
+        
+        has_real_csv = bool(csv_file_path and os.path.isfile(csv_file_path))
+        
+        # Determine attachment section
+        if has_real_csv:
+            attachment_section = '''
+        <div class="attachment-info">
+            <strong>Attachment:</strong> System Products CSV is attached to this email.
+        </div>'''
+        else:
+            attachment_section = ''
+        
+        # Replace placeholders
+        html_message = html_template.replace('{SESSION_ID}', session_id)
+        html_message = html_message.replace('{TOTAL_PRODUCTS}', str(scraping_stats.get('total_products', 0)))
+        html_message = html_message.replace('{SUCCESSFUL_SCRAPES}', str(scraping_stats.get('successful_scrapes', 0)))
+        html_message = html_message.replace('{FAILED_SCRAPES}', str(scraping_stats.get('failed_scrapes', 0)))
+        html_message = html_message.replace('{SUCCESS_RATE}', f"{scraping_stats.get('success_rate', 0):.1f}")
+        html_message = html_message.replace('{DURATION}', str(scraping_stats.get('duration', 'Unknown')))
+        html_message = html_message.replace('{ATTACHMENT_SECTION}', attachment_section)
+        
+        # Form fields
+        email_payload = {
+            "to": recipient_email,
+            "subject": f"Scraping Complete - Session {session_id}",
+            "message": html_message,
+        }
+        
+        # Always send a 'data' file for n8n Gmail node
+        try:
+            if has_real_csv:
+                filename = os.path.basename(csv_file_path)
+                with open(csv_file_path, 'rb') as f:
+                    files = {"data": (filename, f, "text/csv")}
+                    response = requests.post(
+                        EMAIL_WEBHOOK_URL,
+                        data=email_payload,
+                        files=files,
+                        timeout=EMAIL_WEBHOOK_TIMEOUT,
+                    )
+            else:
+                # Build the same system products CSV in-memory
+                csv_bytes = build_system_products_csv_bytes()
+                filename = f"system_products_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                mem = io.BytesIO(csv_bytes if csv_bytes else b"note,No rows\n")
+                files = {"data": (filename, mem, "text/csv")}
+                response = requests.post(
+                    EMAIL_WEBHOOK_URL,
+                    data=email_payload,
+                    files=files,
+                    timeout=EMAIL_WEBHOOK_TIMEOUT,
+                )
+            
+            response.raise_for_status()
+            logger.info(f"Scraping completion email sent successfully to {recipient_email}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send scraping email: {e}")
+            return False
+    
+    except Exception as e:
+        logger.exception(f"Error sending scraping completion email: {e}")
+        return False
 
 def send_upload_notification_email(upload_data: dict, recipient_email: str = None):
     """
@@ -1750,11 +1967,38 @@ async def run_ebayau_scraping_job(session_id: str):
                 webhook_success = await trigger_n8n_rescrape_webhook(all_rescrape_ids, session_id)
                 
                 if webhook_success:
-                    logger.info("✅ n8n webhook triggered successfully")
+                    logger.info("SUCCESS: n8n webhook triggered successfully")
                 else:
-                    logger.error("❌ Failed to trigger n8n webhook - rescraping may not happen automatically")
+                    logger.error("ERROR: Failed to trigger n8n webhook - rescraping may not happen automatically")
             else:
                 logger.info("No products need rescraping, n8n webhook not triggered")
+            
+            # Generate CSV and send completion email
+            try:
+                logger.info("=== GENERATING SYSTEM PRODUCTS CSV ===")
+                csv_file_path = generate_system_products_csv()
+                
+                # Prepare scraping statistics
+                scraping_stats = {
+                    'total_products': total_products,
+                    'successful_scrapes': successful_scrapes,
+                    'failed_scrapes': len(all_rescrape_ids),
+                    'success_rate': (successful_scrapes/total_products)*100 if total_products > 0 else 0,
+                    'duration': duration
+                }
+                
+                logger.info("=== SENDING SCRAPING COMPLETION EMAIL ===")
+                email_success = await asyncio.to_thread(
+                    send_scraping_complete_email, session_id, scraping_stats, csv_file_path
+                )
+                
+                if email_success:
+                    logger.info("SUCCESS: Scraping completion email sent successfully")
+                else:
+                    logger.error("ERROR: Failed to send scraping completion email")
+                    
+            except Exception as email_error:
+                logger.error(f"Error sending scraping completion email: {email_error}")
             
     except Exception as e:
         logger.error(f"=== EBAYAU SCRAPING JOB ERROR ===")
@@ -1953,6 +2197,34 @@ async def run_complete_scraping_job(session_id: str) -> Dict[str, Any]:
         }
         
         logger.info(f"Completed scraping job {session_id}: {successful_scrapes}/{len(valid_products)} successful")
+        
+        # Generate CSV and send completion email
+        try:
+            logger.info("=== GENERATING SYSTEM PRODUCTS CSV ===")
+            csv_file_path = generate_system_products_csv()
+            
+            # Prepare scraping statistics
+            scraping_stats = {
+                'total_products': len(valid_products),
+                'successful_scrapes': successful_scrapes,
+                'failed_scrapes': failed_scrapes,
+                'success_rate': (successful_scrapes/len(valid_products))*100 if len(valid_products) > 0 else 0,
+                'duration': duration
+            }
+            
+            logger.info("=== SENDING SCRAPING COMPLETION EMAIL ===")
+            email_success = await asyncio.to_thread(
+                send_scraping_complete_email, session_id, scraping_stats, csv_file_path
+            )
+            
+            if email_success:
+                logger.info("SUCCESS: Scraping completion email sent successfully")
+            else:
+                logger.error("ERROR: Failed to send scraping completion email")
+                
+        except Exception as email_error:
+            logger.error(f"Error sending scraping completion email: {email_error}")
+        
         return result
         
     except Exception as e:
