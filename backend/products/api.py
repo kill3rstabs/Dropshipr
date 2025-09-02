@@ -26,7 +26,7 @@ import re
 import random
 import logging
 from decimal import Decimal, InvalidOperation
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from django.db import transaction
@@ -40,6 +40,7 @@ import requests
 import io
 import subprocess
 import sys
+from collections import defaultdict
 
 router = Router()
 
@@ -91,6 +92,34 @@ def get_rescrape_products():
 def get_products_by_ids(product_ids):
     """Get products by IDs asynchronously"""
     return list(Product.objects.filter(id__in=product_ids))
+
+# Helper functions for eBayAU SKU deduplication
+
+def _normalize_vendor_sku(sku: str) -> str:
+    # Align with URL construction: split off decimal part and trim
+    return str(sku).split('.')[0].strip()
+
+
+def build_vendor_sku_groups(products: List[Product]) -> Tuple[List[Product], Dict[int, List[int]]]:
+    """
+    Build groups of products sharing the same (vendor_id, normalized vendor_sku).
+
+    Returns:
+      - rep_products: list of representative Product objects (one per unique group)
+      - rep_to_ids: map of representative product.id -> list of all product IDs in that group
+    """
+    key_to_ids: Dict[Tuple[int, str], List[int]] = defaultdict(list)
+    key_to_rep: Dict[Tuple[int, str], Product] = {}
+
+    for p in products:
+        key = (p.vendor_id, _normalize_vendor_sku(p.vendor_sku))
+        key_to_ids[key].append(p.id)
+        if key not in key_to_rep:
+            key_to_rep[key] = p
+
+    rep_products = list(key_to_rep.values())
+    rep_to_ids: Dict[int, List[int]] = {rep.id: key_to_ids[key] for key, rep in key_to_rep.items()}
+    return rep_products, rep_to_ids
 
 # n8n webhook configuration
 N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL', 'https://autoecom.wesolucions.com/webhook/ebayau-rescrape')
@@ -1880,7 +1909,7 @@ def save_ebayau_scraping_results(results: List[Dict[str, Any]]) -> List[int]:
     return rescrape_product_ids
 
 async def run_ebayau_scraping_job(session_id: str):
-    """Complete eBayAU scraping job with vendor name filtering"""
+    """Complete eBayAU scraping job with vendor name filtering and SKU dedupe"""
     start_time = timezone.now()
     
     logger.info(f"=== EBAYAU SCRAPING JOB START ===")
@@ -1891,7 +1920,7 @@ async def run_ebayau_scraping_job(session_id: str):
         # Get products with eBayAU vendor name variations (async)
         logger.info("Fetching eBayAU products from database...")
         products = await get_ebayau_products()
-        total_products = len(products)
+        total_products = len(products)  # total rows to update
         
         logger.info(f"Found {total_products} products with eBayAU vendor names")
         logger.info(f"Vendor names being processed: {eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS}")
@@ -1900,7 +1929,11 @@ async def run_ebayau_scraping_job(session_id: str):
             logger.info("No products found with eBayAU vendor name variations")
             return
         
-        logger.info(f"Starting eBayAU scraping job {session_id}: {total_products} products")
+        # Group by (vendor_id, normalized vendor_sku) to dedupe
+        rep_products, rep_to_ids = build_vendor_sku_groups(products)
+        total_unique = len(rep_products)
+        logger.info(f"Deduped set: {total_unique} unique SKUs from {total_products} products")
+        logger.info(f"Starting eBayAU scraping job {session_id}")
         
         # Configure session
         logger.info("Configuring aiohttp session...")
@@ -1914,61 +1947,69 @@ async def run_ebayau_scraping_job(session_id: str):
             total_processed = 0
             all_rescrape_ids = []
             
-            # Process in batches (50 as per your script)
-            total_batches = (total_products + EBAYAU_BATCH_SIZE - 1) // EBAYAU_BATCH_SIZE
-            logger.info(f"Processing in {total_batches} batches of {EBAYAU_BATCH_SIZE} products each")
+            # Process representative products in batches
+            total_batches = (total_unique + EBAYAU_BATCH_SIZE - 1) // EBAYAU_BATCH_SIZE
+            logger.info(f"Processing in {total_batches} batches of {EBAYAU_BATCH_SIZE} representatives each")
             
-            for i in range(0, total_products, EBAYAU_BATCH_SIZE):
+            for i in range(0, total_unique, EBAYAU_BATCH_SIZE):
                 batch_num = i // EBAYAU_BATCH_SIZE + 1
-                batch = products[i:i + EBAYAU_BATCH_SIZE]
+                reps_batch = rep_products[i:i + EBAYAU_BATCH_SIZE]
                 
-                logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} products)")
+                logger.info(f"Processing batch {batch_num}/{total_batches} ({len(reps_batch)} reps)")
                 
-                # Scrape batch
+                # Scrape reps
                 logger.info(f"Starting scraping for batch {batch_num}")
-                batch_results = await process_ebayau_batch(batch, session)
-                logger.info(f"Batch {batch_num} scraping completed, {len(batch_results)} results received")
+                batch_results = await process_ebayau_batch(reps_batch, session)
+                logger.info(f"Batch {batch_num} scraping completed, {len(batch_results)} rep results received")
                 
-                # Log some sample results for debugging
-                successful_results = [r for r in batch_results if r.get('success')]
-                failed_results = [r for r in batch_results if not r.get('success')]
-                logger.info(f"Batch {batch_num} - Successful: {len(successful_results)}, Failed: {len(failed_results)}")
-                
+                # Fan-out results to all product IDs sharing the same vendor_sku+vendor
+                fanout_results = []
+                for r in batch_results:
+                    targets = rep_to_ids.get(r['product_id'], [r['product_id']])
+                    for pid in targets:
+                        nr = dict(r)
+                        nr['product_id'] = pid
+                        fanout_results.append(nr)
+
+                # Log sample results
+                successful_results = [r for r in fanout_results if r.get('success')]
+                failed_results = [r for r in fanout_results if not r.get('success')]
+                logger.info(f"Batch {batch_num} (expanded) - Successful: {len(successful_results)}, Failed: {len(failed_results)}")
                 if failed_results:
                     logger.info(f"Sample failed results from batch {batch_num}:")
-                    for j, failed in enumerate(failed_results[:3]):  # Log first 3 failures
+                    for j, failed in enumerate(failed_results[:3]):
                         logger.info(f"  Failed {j+1}: Product {failed.get('product_id')} - {failed.get('error_status')}")
                 
-                # Save results (wrap in sync_to_async)
-                logger.info(f"Saving batch {batch_num} results to database...")
-                rescrape_ids = await sync_to_async(save_ebayau_scraping_results)(batch_results)
+                # Save expanded results
+                logger.info(f"Saving batch {batch_num} expanded results to database...")
+                rescrape_ids = await sync_to_async(save_ebayau_scraping_results)(fanout_results)
                 logger.info(f"Batch {batch_num} saved - {len(rescrape_ids)} products need rescraping")
                 
                 all_rescrape_ids.extend(rescrape_ids)
-                total_processed += len(batch)
+                total_processed += len(fanout_results)
                 logger.info(f"Progress: {total_processed}/{total_products} ({(total_processed/total_products)*100:.1f}%)")
             
-            # Log completion
+            # Completion
             duration = timezone.now() - start_time
             successful_scrapes = total_products - len(all_rescrape_ids)
             
             logger.info(f"=== EBAYAU SCRAPING JOB COMPLETE ===")
             logger.info(f"Session ID: {session_id}")
-            logger.info(f"Total products processed: {total_products}")
+            logger.info(f"Total product-rows updated: {total_products}")
+            logger.info(f"Unique SKUs scraped: {total_unique}")
             logger.info(f"Successful scrapes: {successful_scrapes}")
             logger.info(f"Failed scrapes: {len(all_rescrape_ids)}")
             logger.info(f"Success rate: {(successful_scrapes/total_products)*100:.1f}%")
             logger.info(f"Duration: {duration}")
             logger.info(f"Products needing rescrape: {len(all_rescrape_ids)}")
             
-            # 🔥 CRITICAL: Trigger n8n webhook for rescraping
+            # Trigger webhook if needed
             if all_rescrape_ids:
                 logger.info(f"=== TRIGGERING N8N WEBHOOK ===")
                 logger.info(f"Products needing rescrape: {len(all_rescrape_ids)}")
-                logger.info(f"Rescrape product IDs: {all_rescrape_ids[:10]}...")  # Log first 10
+                logger.info(f"Rescrape product IDs: {all_rescrape_ids[:10]}...")
                 
                 webhook_success = await trigger_n8n_rescrape_webhook(all_rescrape_ids, session_id)
-                
                 if webhook_success:
                     logger.info("SUCCESS: n8n webhook triggered successfully")
                 else:
@@ -1976,12 +2017,10 @@ async def run_ebayau_scraping_job(session_id: str):
             else:
                 logger.info("No products need rescraping, n8n webhook not triggered")
             
-            # Generate CSV and send completion email
+            # CSV + email (unchanged, but stats reflect fan-out)
             try:
                 logger.info("=== GENERATING SYSTEM PRODUCTS CSV ===")
                 csv_file_path = generate_system_products_csv()
-                
-                # Prepare scraping statistics
                 scraping_stats = {
                     'total_products': total_products,
                     'successful_scrapes': successful_scrapes,
@@ -1989,17 +2028,14 @@ async def run_ebayau_scraping_job(session_id: str):
                     'success_rate': (successful_scrapes/total_products)*100 if total_products > 0 else 0,
                     'duration': duration
                 }
-                
                 logger.info("=== SENDING SCRAPING COMPLETION EMAIL ===")
                 email_success = await asyncio.to_thread(
                     send_scraping_complete_email, session_id, scraping_stats, csv_file_path
                 )
-                
                 if email_success:
                     logger.info("SUCCESS: Scraping completion email sent successfully")
                 else:
                     logger.error("ERROR: Failed to send scraping completion email")
-                    
             except Exception as email_error:
                 logger.error(f"Error sending scraping completion email: {email_error}")
             
@@ -2011,11 +2047,14 @@ async def run_ebayau_scraping_job(session_id: str):
         logger.error("Error traceback: ", exc_info=True)
 
 async def run_ebayau_rescraping_job(session_id: str, product_ids: List[int]):
-    """Rescrape specific eBayAU products"""
+    """Rescrape specific eBayAU products with SKU dedupe"""
     try:
         # Get products by IDs (async)
         products = await get_products_by_ids(product_ids)
         
+        # Deduplicate by (vendor_id, normalized vendor_sku)
+        rep_products, rep_to_ids = build_vendor_sku_groups(products)
+
         connector = aiohttp.TCPConnector(limit=EBAYAU_MAX_CONCURRENT_REQUESTS, force_close=True)
         async with aiohttp.ClientSession(
             connector=connector, 
@@ -2028,12 +2067,22 @@ async def run_ebayau_rescraping_job(session_id: str, product_ids: List[int]):
             total_processed = 0
             final_rescrape_ids = []
             
-            for i in range(0, len(products), batch_size):
-                batch = products[i:i + batch_size]
-                batch_results = await process_ebayau_batch(batch, session)
-                rescrape_ids = await sync_to_async(save_ebayau_scraping_results)(batch_results)
+            for i in range(0, len(rep_products), batch_size):
+                reps_batch = rep_products[i:i + batch_size]
+                batch_results = await process_ebayau_batch(reps_batch, session)
+
+                # Fan-out results to all duplicates
+                fanout_results = []
+                for r in batch_results:
+                    targets = rep_to_ids.get(r['product_id'], [r['product_id']])
+                    for pid in targets:
+                        nr = dict(r)
+                        nr['product_id'] = pid
+                        fanout_results.append(nr)
+
+                rescrape_ids = await sync_to_async(save_ebayau_scraping_results)(fanout_results)
                 final_rescrape_ids.extend(rescrape_ids)
-                total_processed += len(batch)
+                total_processed += len(fanout_results)
             
             logger.info(f"Completed eBayAU rescraping job {session_id}: {total_processed} processed, {len(final_rescrape_ids)} still need rescraping")
             
