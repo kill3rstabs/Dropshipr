@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Copy } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Input } from "../components/ui/input";
@@ -50,6 +50,8 @@ export default function CreateStoreForm() {
   const [inventorySettingsByVendor, setInventorySettingsByVendor] = useState([]);
   const [pricePendingVendor, setPricePendingVendor] = useState("");
   const [inventoryPendingVendor, setInventoryPendingVendor] = useState("");
+  // Duplicate modal state
+  const [duplicateModal, setDuplicateModal] = useState({ open: false, type: null, fromVendorId: "", toVendorId: "", copyFees: true });
 
   // Fetch marketplaces and vendors
   useEffect(() => { fetchMarketplaces(); fetchVendors(); }, []);
@@ -126,6 +128,61 @@ export default function CreateStoreForm() {
     }
     return { ...v, priceRanges: ranges };
   }));
+
+  // Duplicate handlers
+  const openDuplicateModal = (type) => {
+    if (type === 'price' && priceSettingsByVendor.length === 0) { toast.error('Add at least one vendor in Price Settings first'); return; }
+    if (type === 'inventory' && inventorySettingsByVendor.length === 0) { toast.error('Add at least one vendor in Inventory Settings first'); return; }
+    setDuplicateModal({ open: true, type, fromVendorId: "", toVendorId: "", copyFees: true });
+  };
+  const closeDuplicateModal = () => setDuplicateModal(prev => ({ ...prev, open: false }));
+  const applyDuplicate = () => {
+    const fromId = parseInt(duplicateModal.fromVendorId);
+    const toId = parseInt(duplicateModal.toVendorId);
+    if (!Number.isFinite(fromId) || !Number.isFinite(toId)) { toast.error('Select source and target vendors'); return; }
+    if (!vendors.find(v=>v.id===toId)) { toast.error('Invalid target vendor'); return; }
+
+    if (duplicateModal.type === 'price') {
+      const source = priceSettingsByVendor.find(v=> v.vendorId===fromId);
+      if (!source) { toast.error('Source vendor not found in Price Settings'); return; }
+      const rangesCopy = (source.priceRanges||[]).map(r=> ({ from: String(r.from||"0"), to: String((r.to||"MAX")).toUpperCase()==='MAX'? 'MAX' : String(r.to), margin: String(r.margin||""), minimumMargin: String(r.minimumMargin||"") }));
+      setPriceSettingsByVendor(prev => {
+        const existsIdx = prev.findIndex(v=> v.vendorId===toId);
+        if (existsIdx !== -1) {
+          const proceed = window.confirm('Target vendor already has Price Settings. Overwrite them?');
+          if (!proceed) return prev;
+          const updated = [...prev];
+          updated[existsIdx] = { ...updated[existsIdx], priceRanges: rangesCopy, ...(duplicateModal.copyFees ? { purchaseTax: source.purchaseTax||"", marketplaceFees: source.marketplaceFees||"" } : {}) };
+          return updated;
+        }
+        const newEntry = { vendorId: toId, purchaseTax: duplicateModal.copyFees ? (source.purchaseTax||"") : "", marketplaceFees: duplicateModal.copyFees ? (source.marketplaceFees||"") : "", priceRanges: rangesCopy };
+        return [...prev, newEntry];
+      });
+      toast.success('Price settings duplicated');
+      closeDuplicateModal();
+      return;
+    }
+
+    if (duplicateModal.type === 'inventory') {
+      const source = inventorySettingsByVendor.find(v=> v.vendorId===fromId);
+      if (!source) { toast.error('Source vendor not found in Inventory Settings'); return; }
+      const rangesCopy = (source.priceRanges||[]).map(r=> ({ from: String(r.from||"0"), to: String((r.to||"MAX")).toUpperCase()==='MAX'? 'MAX' : String(r.to), multipliedWith: String(r.multipliedWith||"") }));
+      setInventorySettingsByVendor(prev => {
+        const existsIdx = prev.findIndex(v=> v.vendorId===toId);
+        if (existsIdx !== -1) {
+          const proceed = window.confirm('Target vendor already has Inventory Settings. Overwrite them?');
+          if (!proceed) return prev;
+          const updated = [...prev];
+          updated[existsIdx] = { ...updated[existsIdx], priceRanges: rangesCopy };
+          return updated;
+        }
+        const newEntry = { vendorId: toId, priceRanges: rangesCopy };
+        return [...prev, newEntry];
+      });
+      toast.success('Inventory settings duplicated');
+      closeDuplicateModal();
+    }
+  };
 
   // Navigation Handlers
   const goToNextStep = () => {
@@ -232,6 +289,7 @@ export default function CreateStoreForm() {
                 </SelectContent>
               </Select>
               <Button size="icon" onClick={addPriceVendor}><Plus className="w-4 h-4" /></Button>
+              <Button variant="secondary" onClick={()=> openDuplicateModal('price')}><Copy className="w-4 h-4 mr-2" />Duplicate</Button>
             </div>
             {priceSettingsByVendor.map(v => (
               <div key={v.vendorId} className="border rounded-md p-6 space-y-6">
@@ -297,6 +355,7 @@ export default function CreateStoreForm() {
                 </SelectContent>
               </Select>
               <Button size="icon" onClick={addInventoryVendor}><Plus className="w-4 h-4" /></Button>
+              <Button variant="secondary" onClick={()=> openDuplicateModal('inventory')}><Copy className="w-4 h-4 mr-2" />Duplicate</Button>
             </div>
             {inventorySettingsByVendor.map(v => (
               <div key={v.vendorId} className="border rounded-md p-6 space-y-6">
@@ -332,6 +391,50 @@ export default function CreateStoreForm() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Duplicate Modal */}
+      {duplicateModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={closeDuplicateModal} />
+          <div className="relative bg-white rounded-md shadow-lg w-full max-w-md mx-4 p-6 space-y-4">
+            <h3 className="text-lg font-semibold">{duplicateModal.type === 'price' ? 'Duplicate Price Settings' : 'Duplicate Inventory Settings'}</h3>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label>Copy from vendor</Label>
+                <Select value={duplicateModal.fromVendorId} onValueChange={(value)=> setDuplicateModal(prev=> ({ ...prev, fromVendorId: value }))}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select source vendor" /></SelectTrigger>
+                  <SelectContent>
+                    {(duplicateModal.type==='price' ? priceSettingsByVendor : inventorySettingsByVendor).map(v => (
+                      <SelectItem key={v.vendorId} value={v.vendorId.toString()}>{vendors.find(x=>x.id===v.vendorId)?.name || `Vendor ${v.vendorId}`}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Copy to vendor</Label>
+                <Select value={duplicateModal.toVendorId} onValueChange={(value)=> setDuplicateModal(prev=> ({ ...prev, toVendorId: value }))}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select target vendor" /></SelectTrigger>
+                  <SelectContent>
+                    {vendors.map(v => (
+                      <SelectItem key={v.id} value={v.id.toString()}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {duplicateModal.type==='price' && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={duplicateModal.copyFees} onChange={(e)=> setDuplicateModal(prev=> ({ ...prev, copyFees: e.target.checked }))} />
+                  Include tax & marketplace fees
+                </label>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={closeDuplicateModal}>Cancel</Button>
+              <Button onClick={applyDuplicate}><Copy className="w-4 h-4 mr-2" />Duplicate</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
