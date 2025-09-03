@@ -15,6 +15,8 @@ from django.utils import timezone
 from .models import Upload, Product, Scrape
 from .utils import ingest_upload, ValidationError, ingest_upload_parallel
 from .ebayau_rules import eBayAUBusinessRules
+from .amazonau_rules import AmazonAUBusinessRules
+from .AmazonAUScrapper import AmazonAUScrapper
 from marketplace.models import Marketplace, Store
 from vendor.models import Vendor, VendorPrice
 from django.db import models
@@ -2546,3 +2548,91 @@ def get_upload_status(request, upload_id: int):
             "totalItems": info.get("totalItems", info.get("itemsUploaded", 0)),
         }
     }
+
+@sync_to_async
+def get_amazonau_products_count():
+    return Product.objects.filter(
+        marketplace__code='AmazonAU',
+        store__is_active=True
+    ).count()
+
+@sync_to_async
+def get_amazonau_products():
+    return list(Product.objects.filter(
+        marketplace__code='AmazonAU',
+        store__is_active=True
+    ))
+
+async def run_amazonau_scraping_job(session_id: str):
+    start_time = timezone.now()
+    logger.info(f"=== AMAZONAU SCRAPING JOB START === Session: {session_id}")
+    try:
+        products = await get_amazonau_products()
+        total_products = len(products)
+        if total_products == 0:
+            logger.info("No AmazonAU products found")
+            return
+
+        reps, rep_to_ids = AmazonAUScrapper.build_vendor_groups(products)
+        total_unique = len(reps)
+
+        connector = aiohttp.TCPConnector(limit=AmazonAUScrapper.AMAZONAU_MAX_CONCURRENT_REQUESTS, force_close=True)
+        async with aiohttp.ClientSession(connector=connector, timeout=AmazonAUScrapper.AMAZONAU_TIMEOUT) as session:
+            total_processed = 0
+            for i in range(0, total_unique, AmazonAUScrapper.AMAZONAU_BATCH_SIZE):
+                reps_batch = reps[i:i + AmazonAUScrapper.AMAZONAU_BATCH_SIZE]
+                batch_results = await AmazonAUScrapper.process_batch(reps_batch, session)
+
+                expanded = []
+                for r in batch_results:
+                    targets = rep_to_ids.get(r['product_id'], [r['product_id']])
+                    for pid in targets:
+                        nr = dict(r)
+                        nr['product_id'] = pid
+                        expanded.append(nr)
+
+                await sync_to_async(AmazonAUScrapper.save_results)(expanded)
+                total_processed += len(expanded)
+                logger.info(f"AmazonAU progress: {total_processed}/{total_products}")
+
+        duration = timezone.now() - start_time
+        logger.info(f"=== AMAZONAU SCRAPING JOB COMPLETE === Session: {session_id}, duration: {duration}")
+    except Exception as e:
+        logger.error(f"AmazonAU job error: {e}", exc_info=True)
+
+
+def start_detached_amazon_scrape(session_id: str) -> str:
+    uploads_dir = os.path.join("uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    log_path = os.path.join(uploads_dir, f"scrape_amazon_{session_id}.log")
+    with open(log_path, "ab", buffering=0) as lf:
+        subprocess.Popen(
+            [sys.executable, "manage.py", "scrape_amazonau_job", "--session", session_id],
+            cwd=os.getcwd(),
+            stdout=lf,
+            stderr=lf,
+            start_new_session=True
+        )
+    return log_path
+
+
+@router.post("/scrape-amazonau/")
+async def scrape_amazonau_products(request):
+    logger.info("=== AMAZONAU SCRAPING API CALLED ===")
+    try:
+        session_id = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        total_products = await get_amazonau_products_count()
+        if total_products == 0:
+            return {"success": False, "error": "No products found for AmazonAU marketplace", "products_queued": 0}
+        log_path = start_detached_amazon_scrape(session_id)
+        return {
+            "success": True,
+            "message": "AmazonAU scraping started successfully",
+            "session_id": session_id,
+            "products_queued": total_products,
+            "status": "Scraping job started in background",
+            "log_file": log_path
+        }
+    except Exception as e:
+        logger.error(f"Error starting AmazonAU scraping: {e}")
+        return {"success": False, "error": f"Failed to start AmazonAU scraping: {str(e)}", "products_queued": 0}
