@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import '../styles/Navbar.css';
 import Sidebar from './Sidebar';
-import { User, Bell, Menu, Package } from 'lucide-react';
+import { User, Menu, Package } from 'lucide-react';
 
 const Navbar = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -47,12 +47,6 @@ const Navbar = () => {
 
           {/* Right Section */}
           <div className="flex items-center space-x-4">
-            {/* Notifications */}
-            <button className="relative text-white hover:bg-white/10 p-2 rounded-lg transition-colors">
-              <Bell className="h-6 w-6" />
-              <div className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full"></div>
-            </button>
-
             {/* User Profile */}
             <div className="relative">
               <button 
