@@ -17,6 +17,7 @@ from .utils import ingest_upload, ValidationError, ingest_upload_parallel
 from .ebayau_rules import eBayAUBusinessRules
 from .amazonau_rules import AmazonAUBusinessRules
 from .AmazonAUScrapper import AmazonAUScrapper
+from .CostcoAUScrapper import CostcoAUScrapper
 from marketplace.models import Marketplace, Store
 from vendor.models import Vendor, VendorPrice
 from django.db import models
@@ -283,7 +284,7 @@ EBAYAU_COOKIES = {
     '__uzme': '9985',
     'ak_bmsc': '1ACBBD284EE8CF0470D052F667891336~000000000000000000000000000000~YAAQ5CE1F4nQbMaXAQAAqFXbzxyyRQ21qGWJKt0BpuNhDJ/W/pJ6pzaF0p3d+uIGjR2wRRaW9u8IGdyZNxIsVCkE+z7e+umCf2i0xH9TAKqMvOFWQ9fxEV7QNSTSYI0hRhHa2pxsPuItThD83kAOKaVftxzeIq8epwGjAQgyCS2PMqKTdid0FXlsC7WXMbaB0xRjNCb0Ar0vLwD+2IDH85F8GLl6C1Tyg9HzdaieMnJJxY4HXhWEOQyW/Wjdmaz/tAPXuGceCF8l8LoYtbdZnJaizYBtT0iFLh8DX8cQNax8EIjs3/5+aJbHu2boJsqZ9A/sJ4QgnHSgQPUDv163J7IELq2w97cp7hzZbC8rCcQk8zitfjh0jt/SAo1YdnnQEgFK/X0tEQ==',
     '__ssds': '2',
-    '__ssuzjsr2': 'a9be0cd8e',
+    '__uzjsr2': 'a9be0cd8e',
     'ebay': '%5Ejs%3D1%5Esbf%3D%23000000%5E',
     '__uzmc': '916572543451',
     '__uzmd': '1751538964',
@@ -2636,3 +2637,112 @@ async def scrape_amazonau_products(request):
     except Exception as e:
         logger.error(f"Error starting AmazonAU scraping: {e}")
         return {"success": False, "error": f"Failed to start AmazonAU scraping: {str(e)}", "products_queued": 0}
+
+@sync_to_async
+def get_costcoau_products_count():
+    return Product.objects.filter(
+        vendor__name__iexact='CostcoAU',
+        store__is_active=True
+    ).count()
+
+@sync_to_async
+def get_costcoau_products():
+    return list(Product.objects.filter(
+        vendor__name__iexact='CostcoAU',
+        store__is_active=True
+    ))
+
+async def run_costcoau_scraping_job(session_id: str):
+    start_time = timezone.now()
+    logger.info(f"=== COSTCOAU SCRAPING JOB START === Session: {session_id}")
+    try:
+        products = await get_costcoau_products()
+        total_products = len(products)
+        if total_products == 0:
+            logger.info("No CostcoAU products found")
+            return
+
+        reps, rep_to_ids = CostcoAUScrapper.build_vendor_groups(products)
+        total_unique = len(reps)
+
+        connector = aiohttp.TCPConnector(limit=CostcoAUScrapper.COSTCOAU_MAX_CONCURRENT_REQUESTS, force_close=True)
+        async with aiohttp.ClientSession(connector=connector, timeout=CostcoAUScrapper.COSTCOAU_TIMEOUT) as session:
+            total_processed = 0
+            for i in range(0, total_unique, CostcoAUScrapper.COSTCOAU_BATCH_SIZE):
+                reps_batch = reps[i:i + CostcoAUScrapper.COSTCOAU_BATCH_SIZE]
+                batch_results = await CostcoAUScrapper.process_batch(reps_batch, session)
+
+                expanded = []
+                for r in batch_results:
+                    targets = rep_to_ids.get(r['product_id'], [r['product_id']])
+                    for pid in targets:
+                        nr = dict(r)
+                        nr['product_id'] = pid
+                        expanded.append(nr)
+
+                await sync_to_async(CostcoAUScrapper.save_results)(expanded)
+                total_processed += len(expanded)
+                logger.info(f"CostcoAU progress: {total_processed}/{total_products}")
+
+        duration = timezone.now() - start_time
+        logger.info(f"=== COSTCOAU SCRAPING JOB COMPLETE === Session: {session_id}, duration: {duration}")
+
+        # Generate system products CSV and email
+        try:
+            csv_file_path = generate_system_products_csv()
+            scraping_stats = {
+                'total_products': total_products,
+                'successful_scrapes': total_processed,
+                'failed_scrapes': 0 if total_products == 0 else max(0, total_products - total_processed),
+                'success_rate': (total_processed/total_products)*100 if total_products > 0 else 0,
+                'duration': duration
+            }
+            email_success = await asyncio.to_thread(
+                send_scraping_complete_email, session_id, scraping_stats, csv_file_path
+            )
+            if email_success:
+                logger.info("SUCCESS: CostcoAU scraping completion email sent successfully")
+            else:
+                logger.error("ERROR: Failed to send CostcoAU scraping completion email")
+        except Exception as email_error:
+            logger.error(f"Error sending CostcoAU scraping completion email: {email_error}")
+
+    except Exception as e:
+        logger.error(f"CostcoAU job error: {e}", exc_info=True)
+
+
+def start_detached_costco_scrape(session_id: str) -> str:
+    uploads_dir = os.path.join("uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    log_path = os.path.join(uploads_dir, f"scrape_costco_{session_id}.log")
+    with open(log_path, "ab", buffering=0) as lf:
+        subprocess.Popen(
+            [sys.executable, "manage.py", "scrape_costcoau_job", "--session", session_id],
+            cwd=os.getcwd(),
+            stdout=lf,
+            stderr=lf,
+            start_new_session=True
+        )
+    return log_path
+
+
+@router.post("/scrape-costcoau/")
+async def scrape_costcoau_products(request):
+    logger.info("=== COSTCOAU SCRAPING API CALLED ===")
+    try:
+        session_id = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        total_products = await get_costcoau_products_count()
+        if total_products == 0:
+            return {"success": False, "error": "No CostcoAU products found", "products_queued": 0}
+        log_path = start_detached_costco_scrape(session_id)
+        return {
+            "success": True,
+            "message": "CostcoAU scraping started successfully",
+            "session_id": session_id,
+            "products_queued": total_products,
+            "status": "Scraping job started in background",
+            "log_file": log_path
+        }
+    except Exception as e:
+        logger.error(f"Error starting CostcoAU scraping: {e}")
+        return {"success": False, "error": f"Failed to start CostcoAU scraping: {str(e)}", "products_queued": 0}

@@ -14,7 +14,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { marketplaceAPI, transformStoreDataForAPI } from "../services/api";
 
 function sortRanges(ranges){return [...ranges].sort((a,b)=> (parseFloat(a.from||0)-parseFloat(b.from||0)))}
-function rangesAreContiguous(ranges){if(!ranges.length) return true; const sr=sortRanges(ranges); if(parseFloat(sr[0].from||0)!==0) return false; for(let i=0;i<sr.length-1;i++){if(String(sr[i].to)!==String(sr[i+1].from)) return false;} return String(sr[sr.length-1].to||"MAX")==="MAX"}
+function rangesAreContiguous(ranges){
+  if(!ranges.length) return true;
+  const sr = sortRanges(ranges);
+  const start = parseFloat(sr[0].from || 0);
+  if(!Number.isFinite(start) || start !== 0) return false;
+  for(let i=0;i<sr.length-1;i++){
+    const a = parseFloat(sr[i].to);
+    const b = parseFloat(sr[i+1].from);
+    if(!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a-b) > 1e-9) return false;
+  }
+  const lastTo = String(sr[sr.length-1].to || "MAX").trim().toUpperCase();
+  return lastTo === "MAX";
+}
 
 export default function CreateStoreForm() {
   const navigate = useNavigate();
@@ -80,7 +92,16 @@ export default function CreateStoreForm() {
   const updatePriceVendorField = (vendorId, field, value) => setPriceSettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, [field]: value.replace(/[^0-9.]/g, "") } : v));
   const addPriceRange = (vendorId) => setPriceSettingsByVendor(prev => prev.map(v=>{ if(v.vendorId!==vendorId) return v; const ranges=[...v.priceRanges]; const last= ranges[ranges.length-1]; const from = last.from || "0"; const to = (parseFloat(from||0)+100).toString(); ranges[ranges.length-1] = { ...last, to }; ranges.push({ from: to, to: "MAX", margin: "", minimumMargin: ""}); return { ...v, priceRanges: ranges }; }));
   const updatePriceRange = (vendorId, idx, field, value) => setPriceSettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.map((r,i)=> i===idx ? { ...r, [field]: field==='to'? value.replace(/[^0-9.]/g, ""): value.replace(/[^0-9.]/g, "") } : r) } : v));
-  const removePriceRangeRow = (vendorId, idx) => setPriceSettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.filter((_,i)=> i!==idx) } : v));
+  const removePriceRangeRow = (vendorId, idx) => setPriceSettingsByVendor(prev => prev.map(v => {
+    if (v.vendorId !== vendorId) return v;
+    let ranges = v.priceRanges.filter((_, i) => i !== idx);
+    if (!ranges.length) {
+      ranges = [{ from: "0", to: "MAX", margin: "", minimumMargin: "" }];
+    } else {
+      ranges[ranges.length - 1] = { ...ranges[ranges.length - 1], to: "MAX" };
+    }
+    return { ...v, priceRanges: ranges };
+  }));
 
   // Inventory tab vendor helpers
   const usedInventoryVendors = useMemo(()=> new Set(inventorySettingsByVendor.map(v=>v.vendorId)), [inventorySettingsByVendor]);
@@ -95,7 +116,16 @@ export default function CreateStoreForm() {
   const removeInventoryVendor = (vendorId) => setInventorySettingsByVendor(prev=> prev.filter(v=> v.vendorId!==vendorId));
   const addInventoryRange = (vendorId) => setInventorySettingsByVendor(prev => prev.map(v=>{ if(v.vendorId!==vendorId) return v; const ranges=[...v.priceRanges]; const last=ranges[ranges.length-1]; const from= last.from || "0"; const to=(parseFloat(from||0)+100).toString(); ranges[ranges.length-1]={...last, to}; ranges.push({ from: to, to: "MAX", multipliedWith: ""}); return { ...v, priceRanges: ranges }; }));
   const updateInventoryRange = (vendorId, idx, field, value) => setInventorySettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.map((r,i)=> i===idx ? { ...r, [field]: value.replace(/[^0-9.]/g, "") } : r)} : v));
-  const removeInventoryRangeRow = (vendorId, idx) => setInventorySettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.filter((_,i)=> i!==idx) } : v));
+  const removeInventoryRangeRow = (vendorId, idx) => setInventorySettingsByVendor(prev => prev.map(v => {
+    if (v.vendorId !== vendorId) return v;
+    let ranges = v.priceRanges.filter((_, i) => i !== idx);
+    if (!ranges.length) {
+      ranges = [{ from: "0", to: "MAX", multipliedWith: "" }];
+    } else {
+      ranges[ranges.length - 1] = { ...ranges[ranges.length - 1], to: "MAX" };
+    }
+    return { ...v, priceRanges: ranges };
+  }));
 
   // Navigation Handlers
   const goToNextStep = () => {
