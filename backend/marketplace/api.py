@@ -13,7 +13,7 @@ from .models import (
 from ninja.router import Router
 from .schema import (
     MarketplaceSchema, PriceRangeSchema, StorePriceSettingsSchema,
-    StoreInventorySettingsSchema, StoreCreateSchema, StoreResponseSchema
+    StoreInventorySettingsSchema, StoreCreateSchema, StoreResponseSchema, StoreActiveSchema
 )
 
 # Create API instance
@@ -145,6 +145,15 @@ def update_store(request, store_id: int, payload: StoreCreateSchema):
             multiplier=inventory_range_data.multiplier
         )
     
+    return get_store_response(store)
+
+@router.put("/stores/{store_id}/active", response=StoreResponseSchema)
+@transaction.atomic
+def set_store_active(request, store_id: int, payload: StoreActiveSchema):
+    """Set a store's active status only"""
+    store = get_object_or_404(Store, id=store_id)
+    store.is_active = payload.is_active
+    store.save(update_fields=["is_active", "updated_at"])
     return get_store_response(store)
 
 @router.delete("/stores/{store_id}")

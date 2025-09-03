@@ -70,14 +70,16 @@ db_logger.setLevel(logging.DEBUG)
 def get_ebayau_products_count():
     """Get count of eBayAU products asynchronously"""
     return Product.objects.filter(
-        vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS
+        vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS,
+        store__is_active=True
     ).count()
 
 @sync_to_async
 def get_ebayau_products():
     """Get eBayAU products asynchronously"""
     return list(Product.objects.filter(
-        vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS
+        vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS,
+        store__is_active=True
     ))
 
 @sync_to_async
@@ -85,7 +87,8 @@ def get_rescrape_products():
     """Get products that need rescraping asynchronously"""
     return list(Product.objects.filter(
         vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS,
-        scrapes__needs_rescrape=True
+        scrapes__needs_rescrape=True,
+        store__is_active=True
     ))
 
 @sync_to_async
@@ -2184,7 +2187,8 @@ async def run_complete_scraping_job(session_id: str) -> Dict[str, Any]:
         
         # Get products to scrape
         products = Product.objects.filter(
-            marketplace=ebay_marketplace
+            marketplace=ebay_marketplace,
+            store__is_active=True
         ).select_related('vendor', 'marketplace', 'store', 'upload')
         
         # Validate eBay item numbers
@@ -2226,7 +2230,7 @@ async def run_complete_scraping_job(session_id: str) -> Dict[str, Any]:
         save_scraping_results(all_results)
         
         # Update store last_scrape_time
-        Store.objects.filter(marketplace=ebay_marketplace).update(
+        Store.objects.filter(marketplace=ebay_marketplace, is_active=True).update(
             last_scrape_time=datetime.now()
         )
         
@@ -2313,7 +2317,7 @@ async def scrape_products(request):
             }
         
         # Quick count of products
-        total_products = Product.objects.filter(marketplace=ebay_marketplace).count()
+        total_products = Product.objects.filter(marketplace=ebay_marketplace, store__is_active=True).count()
         
         # Start scraping job in background
         asyncio.create_task(run_complete_scraping_job(session_id))
@@ -2467,7 +2471,8 @@ async def check_rescrape_status(request):
         
         rescrape_products = Product.objects.filter(
             vendor__name__in=eBayAUBusinessRules.EBAYAU_VENDOR_VARIATIONS,
-            scrapes__needs_rescrape=True
+            scrapes__needs_rescrape=True,
+            store__is_active=True
         ).distinct()
         
         final_rescrape_count = rescrape_products.count()

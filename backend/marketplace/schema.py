@@ -40,4 +40,7 @@ class StoreResponseSchema(Schema):
     is_active: bool
     created_at: str
     price_settings: StorePriceSettingsSchema
-    inventory_settings: StoreInventorySettingsSchema 
+    inventory_settings: StoreInventorySettingsSchema
+
+class StoreActiveSchema(Schema):
+    is_active: bool 

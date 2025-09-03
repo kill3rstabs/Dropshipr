@@ -55,6 +55,12 @@ export const marketplaceAPI = {
     body: JSON.stringify(storeData),
   }),
   
+  // Set active flag only
+  setStoreActive: (storeId, isActive) => apiCall(`/marketplace/stores/${storeId}/active`, {
+    method: 'PUT',
+    body: JSON.stringify({ is_active: isActive }),
+  }),
+  
   // Delete store
   deleteStore: (storeId) => apiCall(`/marketplace/stores/${storeId}`, {
     method: 'DELETE',

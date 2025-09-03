@@ -41,44 +41,13 @@ export default function StoreListingPage() {
     (store.storeInfo?.storeName?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const handleToggleActive = async (id) => {
+  const handleToggleActive = async (id, nextActive) => {
     try {
-      const store = stores.find(s => s.id === id);
-      if (!store) return;
-
-      // Update the store's active status
-      const updatedStore = { ...store, is_active: !store.is_active };
-      
-      // Call API to update store
-      await marketplaceAPI.updateStore(id, {
-        name: store.name,
-        marketplace_id: store.marketplace_id,
-        api_key_enc: store.storeInfo?.apiKey || "",
-        price_settings: {
-          purchase_tax_percentage: parseFloat(store.priceSettings.purchaseTax) || 0,
-          marketplace_fees_percentage: parseFloat(store.priceSettings.marketplaceFees) || 0,
-          price_ranges: store.priceSettings.priceRanges.map(range => ({
-            from_value: parseFloat(range.from) || 0,
-            to_value: range.to || "MAX",
-            margin_percentage: parseFloat(range.margin) || 0,
-            minimum_margin_cents: parseInt(range.minimumMargin) * 100 || 0
-          }))
-        },
-        inventory_settings: {
-          inventory_ranges: store.inventorySettings.priceRanges.map(range => ({
-            from_value: parseFloat(range.from) || 0,
-            to_value: range.to || "MAX",
-            multiplier: parseFloat(range.multipliedWith) || 0
-          }))
-        }
-      });
-
-      // Update local state
-      const updatedStores = stores.map((store) => 
-        store.id === id ? { ...store, is_active: !store.is_active } : store
-      );
+      const updated = await marketplaceAPI.setStoreActive(id, nextActive);
+      const updatedStore = transformStoreDataForFrontend(updated);
+      const updatedStores = stores.map((s) => s.id === id ? updatedStore : s);
       setStores(updatedStores);
-      toast.success(`Store ${store.is_active ? 'deactivated' : 'activated'} successfully`);
+      toast.success(`Store ${updatedStore.is_active ? 'activated' : 'deactivated'} successfully`);
     } catch (err) {
       console.error('Error updating store:', err);
       toast.error('Failed to update store status');
@@ -190,7 +159,7 @@ export default function StoreListingPage() {
                   <TableCell className="font-medium py-4 px-4">{getStoreName(store)}</TableCell>
                   <TableCell className="py-4 px-4">{getMarketplace(store)}</TableCell>
                   <TableCell className="py-4 px-4">
-                    <Switch checked={store.is_active} onCheckedChange={() => handleToggleActive(store.id)} />
+                    <Switch checked={store.is_active} onCheckedChange={(checked) => handleToggleActive(store.id, checked)} />
                   </TableCell>
                   <TableCell className="py-4 px-4">
                     <div className="flex gap-3">
