@@ -14,33 +14,37 @@ class PriceRangeSchema(Schema):
     minimum_margin_cents: Optional[int] = None
     multiplier: Optional[Decimal] = None
 
-class StorePriceSettingsSchema(Schema):
+class StorePriceSettingsPerVendorSchema(Schema):
+    vendor_id: int
     purchase_tax_percentage: Decimal
     marketplace_fees_percentage: Decimal
     price_ranges: List[PriceRangeSchema]
 
-class StoreInventorySettingsSchema(Schema):
+class StoreInventorySettingsPerVendorSchema(Schema):
+    vendor_id: int
     inventory_ranges: List[PriceRangeSchema]
 
 class StoreCreateSchema(Schema):
     name: str
     marketplace_id: int
     api_key_enc: Optional[str] = None
-    price_settings: StorePriceSettingsSchema
-    inventory_settings: StoreInventorySettingsSchema
+    price_settings_by_vendor: List[StorePriceSettingsPerVendorSchema]
+    inventory_settings_by_vendor: List[StoreInventorySettingsPerVendorSchema]
+
+class StoreDuplicateSchema(Schema):
+    name: str
+    marketplace_id: int
+    api_key_enc: Optional[str] = None
 
 class StoreResponseSchema(Schema):
     id: int
     name: str
     marketplace: MarketplaceSchema
     api_key_enc: Optional[str]
-    scraping_enabled: bool
-    scraping_interval_hours: int
-    price_update_enabled: bool
     is_active: bool
     created_at: str
-    price_settings: StorePriceSettingsSchema
-    inventory_settings: StoreInventorySettingsSchema
+    price_settings_by_vendor: List[StorePriceSettingsPerVendorSchema]
+    inventory_settings_by_vendor: List[StoreInventorySettingsPerVendorSchema]
 
 class StoreActiveSchema(Schema):
     is_active: bool 

@@ -146,6 +146,7 @@ def validate_upload_file(file_path):
 
 
 
+
 def ingest_upload(upload_id):
     """
     Process upload with comprehensive validation and transaction support.
@@ -158,6 +159,8 @@ def ingest_upload(upload_id):
     Store = apps.get_model('marketplace', 'Store')
     Product = apps.get_model('products', 'Product')
     VendorPrice = apps.get_model('vendor', 'VendorPrice')
+    StorePriceSettings = apps.get_model('marketplace', 'StorePriceSettings')
+    StoreInventorySettings = apps.get_model('marketplace', 'StoreInventorySettings')
     
     upload = Upload.objects.get(id=upload_id)
     
@@ -227,6 +230,15 @@ def ingest_upload(upload_id):
                 
                 if not store:
                     raise ValueError(f"Store {str(row['store_name']).strip()} not found for marketplace {marketplace.name}")
+
+                # Enforce settings existence for (store, vendor)
+                has_price = StorePriceSettings.objects.filter(store=store, vendor=vendor).exists()
+                has_inventory = StoreInventorySettings.objects.filter(store=store, vendor=vendor).exists()
+                if not (has_price and has_inventory):
+                    raise ValidationError(
+                        f"Missing settings for Store '{store.name}' (Marketplace '{marketplace.name}') and Vendor '{vendor.name}'.",
+                        "MISSING_STORE_VENDOR_SETTINGS"
+                    )
                 
                 # Handle variation ID
                 variation_id = ''
@@ -277,6 +289,7 @@ def ingest_upload(upload_id):
     return processed_count
 
 
+
 def ingest_upload_parallel(upload_id: int, workers: int = 4, batch_size: int = 500) -> int:
     Upload = apps.get_model('products', 'Upload')
     Vendor = apps.get_model('vendor', 'Vendor')
@@ -284,6 +297,8 @@ def ingest_upload_parallel(upload_id: int, workers: int = 4, batch_size: int = 5
     Store = apps.get_model('marketplace', 'Store')
     Product = apps.get_model('products', 'Product')
     VendorPrice = apps.get_model('vendor', 'VendorPrice')
+    StorePriceSettings = apps.get_model('marketplace', 'StorePriceSettings')
+    StoreInventorySettings = apps.get_model('marketplace', 'StoreInventorySettings')
 
     upload = Upload.objects.get(id=upload_id)
 
@@ -336,6 +351,13 @@ def ingest_upload_parallel(upload_id: int, workers: int = 4, batch_size: int = 5
         if not st: continue
         ven = vendor_map.get(r['vendor_name'])
         if not ven: continue
+
+        # Enforce settings existence for (store, vendor)
+        if not StorePriceSettings.objects.filter(store=st, vendor=ven).exists() or not StoreInventorySettings.objects.filter(store=st, vendor=ven).exists():
+            raise ValidationError(
+                f"Missing settings for Store '{st.name}' (Marketplace '{mp.name}') and Vendor '{ven.name}'.",
+                "MISSING_STORE_VENDOR_SETTINGS"
+            )
 
         variation_id = ''
         if str(r.get('is_variation','')).lower() in ['yes','true','1'] and r.get('variation_id'):

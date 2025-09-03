@@ -30,7 +30,10 @@ export const marketplaceAPI = {
   // Get all marketplaces
   getMarketplaces: () => apiCall('/marketplace/marketplaces'),
   
-  // Get all stores
+  // Get vendors (global)
+  getVendors: () => apiCall('/vendor/vendors'),
+  
+  // Get all stores (summary)
   getStores: (params = {}) => {
     const queryParams = new URLSearchParams();
     if (params.marketplace_id) queryParams.append('marketplace_id', params.marketplace_id);
@@ -40,7 +43,7 @@ export const marketplaceAPI = {
     return apiCall(`/marketplace/stores${queryString ? `?${queryString}` : ''}`);
   },
   
-  // Get single store
+  // Get single store (full vendor settings)
   getStore: (storeId) => apiCall(`/marketplace/stores/${storeId}`),
   
   // Create store
@@ -55,6 +58,12 @@ export const marketplaceAPI = {
     body: JSON.stringify(storeData),
   }),
   
+  // Duplicate store
+  duplicateStore: (storeId, data) => apiCall(`/marketplace/stores/${storeId}/duplicate`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  
   // Set active flag only
   setStoreActive: (storeId, isActive) => apiCall(`/marketplace/stores/${storeId}/active`, {
     method: 'PUT',
@@ -67,33 +76,35 @@ export const marketplaceAPI = {
   }),
 };
 
-// Helper function to transform frontend data to API format
-export const transformStoreDataForAPI = (storeInfo, priceSettings, inventorySettings) => {
+// Helper function to transform frontend data to API format (vendor arrays)
+export const transformStoreDataForAPI = (storeInfo, priceSettingsByVendor, inventorySettingsByVendor) => {
   return {
     name: storeInfo.storeName,
     marketplace_id: parseInt(storeInfo.marketplace),
     api_key_enc: storeInfo.apiKey || "",
-    price_settings: {
-      purchase_tax_percentage: parseFloat(priceSettings.purchaseTax) || 0,
-      marketplace_fees_percentage: parseFloat(priceSettings.marketplaceFees) || 0,
-      price_ranges: priceSettings.priceRanges.map(range => ({
+    price_settings_by_vendor: (priceSettingsByVendor || []).map(v => ({
+      vendor_id: v.vendorId,
+      purchase_tax_percentage: parseFloat(v.purchaseTax) || 0,
+      marketplace_fees_percentage: parseFloat(v.marketplaceFees) || 0,
+      price_ranges: (v.priceRanges || []).map(range => ({
         from_value: parseFloat(range.from) || 0,
         to_value: range.to || "MAX",
         margin_percentage: parseFloat(range.margin) || 0,
-        minimum_margin_cents: parseInt(range.minimumMargin) * 100 || 0
+        minimum_margin_cents: ((parseInt(range.minimumMargin) || 0) * 100)
       }))
-    },
-    inventory_settings: {
-      inventory_ranges: inventorySettings.priceRanges.map(range => ({
+    })),
+    inventory_settings_by_vendor: (inventorySettingsByVendor || []).map(v => ({
+      vendor_id: v.vendorId,
+      inventory_ranges: (v.priceRanges || []).map(range => ({
         from_value: parseFloat(range.from) || 0,
         to_value: range.to || "MAX",
         multiplier: parseFloat(range.multipliedWith) || 0
       }))
-    }
+    }))
   };
 };
 
-// Helper function to transform API data to frontend format
+// Helper function to transform API data to frontend format (vendor arrays)
 export const transformStoreDataForFrontend = (apiStoreData) => {
   return {
     id: apiStoreData.id,
@@ -101,31 +112,30 @@ export const transformStoreDataForFrontend = (apiStoreData) => {
     marketplace: apiStoreData.marketplace.name,
     marketplace_id: apiStoreData.marketplace.id,
     is_active: apiStoreData.is_active,
-    scraping_enabled: apiStoreData.scraping_enabled,
-    scraping_interval_hours: apiStoreData.scraping_interval_hours,
-    price_update_enabled: apiStoreData.price_update_enabled,
     created_at: apiStoreData.created_at,
     storeInfo: {
       storeName: apiStoreData.name,
       marketplace: apiStoreData.marketplace.id.toString(),
       apiKey: apiStoreData.api_key_enc,
     },
-    priceSettings: {
-      purchaseTax: apiStoreData.price_settings.purchase_tax_percentage.toString(),
-      marketplaceFees: apiStoreData.price_settings.marketplace_fees_percentage.toString(),
-      priceRanges: apiStoreData.price_settings.price_ranges.map(range => ({
+    priceSettingsByVendor: (apiStoreData.price_settings_by_vendor || []).map(s => ({
+      vendorId: s.vendor_id,
+      purchaseTax: s.purchase_tax_percentage.toString(),
+      marketplaceFees: s.marketplace_fees_percentage.toString(),
+      priceRanges: (s.price_ranges || []).map(range => ({
         from: range.from_value.toString(),
         to: range.to_value,
         margin: range.margin_percentage.toString(),
-        minimumMargin: (range.minimum_margin_cents / 100).toString()
+        minimumMargin: ((range.minimum_margin_cents || 0) / 100).toString()
       }))
-    },
-    inventorySettings: {
-      priceRanges: apiStoreData.inventory_settings.inventory_ranges.map(range => ({
+    })),
+    inventorySettingsByVendor: (apiStoreData.inventory_settings_by_vendor || []).map(s => ({
+      vendorId: s.vendor_id,
+      priceRanges: (s.inventory_ranges || []).map(range => ({
         from: range.from_value.toString(),
         to: range.to_value,
         multipliedWith: range.multiplier.toString()
       }))
-    }
+    }))
   };
 }; 

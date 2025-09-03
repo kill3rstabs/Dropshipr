@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Input } from "../components/ui/input";
@@ -10,9 +10,11 @@ import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { Plus, Trash2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { marketplaceAPI, transformStoreDataForAPI } from "../services/api";
+
+function sortRanges(ranges){return [...ranges].sort((a,b)=> (parseFloat(a.from||0)-parseFloat(b.from||0)))}
+function rangesAreContiguous(ranges){if(!ranges.length) return true; const sr=sortRanges(ranges); if(parseFloat(sr[0].from||0)!==0) return false; for(let i=0;i<sr.length-1;i++){if(String(sr[i].to)!==String(sr[i+1].from)) return false;} return String(sr[sr.length-1].to||"MAX")==="MAX"}
 
 export default function CreateStoreForm() {
   const navigate = useNavigate();
@@ -22,6 +24,7 @@ export default function CreateStoreForm() {
   const [storeId, setStoreId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [marketplaces, setMarketplaces] = useState([]);
+  const [vendors, setVendors] = useState([]);
 
   // Store Information State
   const [storeInfo, setStoreInfo] = useState({
@@ -30,152 +33,78 @@ export default function CreateStoreForm() {
     apiKey: "",
   });
 
-  // Price Settings State
-  const [priceSettings, setPriceSettings] = useState({
-    purchaseTax: "",
-    marketplaceFees: "",
-    priceRanges: [{ from: "", to: "MAX", margin: "", minimumMargin: "" }],
-  });
+  // Vendor-scoped arrays
+  const [priceSettingsByVendor, setPriceSettingsByVendor] = useState([]);
+  const [inventorySettingsByVendor, setInventorySettingsByVendor] = useState([]);
+  const [pricePendingVendor, setPricePendingVendor] = useState("");
+  const [inventoryPendingVendor, setInventoryPendingVendor] = useState("");
 
-  // Inventory Settings State
-  const [inventorySettings, setInventorySettings] = useState({
-    priceRanges: [{ from: "", to: "MAX", multipliedWith: "" }],
-  });
-
-  // Fetch marketplaces from API
-  useEffect(() => {
-    fetchMarketplaces();
-  }, []);
+  // Fetch marketplaces and vendors
+  useEffect(() => { fetchMarketplaces(); fetchVendors(); }, []);
 
   const fetchMarketplaces = async () => {
-    try {
-      const marketplacesData = await marketplaceAPI.getMarketplaces();
-      setMarketplaces(marketplacesData);
-    } catch (err) {
-      console.error('Error fetching marketplaces:', err);
-      toast.error('Failed to load marketplaces');
-    }
+    try { const marketplacesData = await marketplaceAPI.getMarketplaces(); setMarketplaces(marketplacesData);} catch (err) { console.error('Error fetching marketplaces:', err); toast.error('Failed to load marketplaces'); }
+  };
+  const fetchVendors = async () => {
+    try { const list = await marketplaceAPI.getVendors(); setVendors(list||[]);} catch (err) { console.error('Error fetching vendors:', err); toast.error('Failed to load vendors'); }
   };
 
   // Check if we're in edit mode
   useEffect(() => {
     if (location.state && location.state.storeData) {
-      const { id, storeInfo: editStoreInfo, priceSettings: editPriceSettings, inventorySettings: editInventorySettings } = location.state.storeData;
-      
+      const { id, storeInfo: editStoreInfo, priceSettingsByVendor: ps, inventorySettingsByVendor: is } = location.state.storeData;
       setIsEditMode(true);
       setStoreId(id);
-      
       if (editStoreInfo) setStoreInfo(editStoreInfo);
-      if (editPriceSettings) setPriceSettings(editPriceSettings);
-      if (editInventorySettings) setInventorySettings(editInventorySettings);
+      if (ps) setPriceSettingsByVendor(ps);
+      if (is) setInventorySettingsByVendor(is);
     }
   }, [location.state]);
 
   // Store Info Handlers
   const updateStoreInfo = (field, value) => {
-    setStoreInfo((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    setStoreInfo((prev) => ({ ...prev, [field]: value }));
   };
 
-  // Price Settings Handlers
-  const updatePriceSettings = (field, value) => {
-    const numericValue = field !== "priceRanges" ? value.replace(/[^0-9.]/g, "") : value;
-    setPriceSettings((prev) => ({
-      ...prev,
-      [field]: numericValue,
-    }));
+  // Price tab vendor helpers
+  const usedPriceVendors = useMemo(()=> new Set(priceSettingsByVendor.map(v=>v.vendorId)), [priceSettingsByVendor]);
+  const availablePriceVendors = useMemo(()=> vendors.filter(v=> !usedPriceVendors.has(v.id)), [vendors, usedPriceVendors]);
+  const addPriceVendor = () => {
+    if(!pricePendingVendor) { toast.error('Select a vendor'); return; }
+    const vid = parseInt(pricePendingVendor);
+    if (usedPriceVendors.has(vid)) { toast.error('Vendor already added'); return; }
+    setPriceSettingsByVendor(prev => ([...prev, { vendorId: vid, purchaseTax: "", marketplaceFees: "", priceRanges: [{ from: "0", to: "MAX", margin: "", minimumMargin: "" }] }]));
+    setPricePendingVendor("");
   };
+  const removePriceVendor = (vendorId) => setPriceSettingsByVendor(prev=> prev.filter(v=> v.vendorId!==vendorId));
+  const updatePriceVendorField = (vendorId, field, value) => setPriceSettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, [field]: value.replace(/[^0-9.]/g, "") } : v));
+  const addPriceRange = (vendorId) => setPriceSettingsByVendor(prev => prev.map(v=>{ if(v.vendorId!==vendorId) return v; const ranges=[...v.priceRanges]; const last= ranges[ranges.length-1]; const from = last.from || "0"; const to = (parseFloat(from||0)+100).toString(); ranges[ranges.length-1] = { ...last, to }; ranges.push({ from: to, to: "MAX", margin: "", minimumMargin: ""}); return { ...v, priceRanges: ranges }; }));
+  const updatePriceRange = (vendorId, idx, field, value) => setPriceSettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.map((r,i)=> i===idx ? { ...r, [field]: field==='to'? value.replace(/[^0-9.]/g, ""): value.replace(/[^0-9.]/g, "") } : r) } : v));
+  const removePriceRangeRow = (vendorId, idx) => setPriceSettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.filter((_,i)=> i!==idx) } : v));
 
-  const addPriceRange = () => {
-    const updatedRanges = [...priceSettings.priceRanges];
-    const lastIndex = updatedRanges.length - 1;
-
-    const fromValue = updatedRanges[lastIndex].from || "0";
-    const toValue = fromValue ? (parseInt(fromValue) + 100).toString() : "100";
-
-    updatedRanges[lastIndex] = {
-      ...updatedRanges[lastIndex],
-      to: toValue,
-    };
-
-    setPriceSettings((prev) => ({
-      ...prev,
-      priceRanges: [...updatedRanges, { from: toValue, to: "MAX", margin: "", minimumMargin: "" }],
-    }));
+  // Inventory tab vendor helpers
+  const usedInventoryVendors = useMemo(()=> new Set(inventorySettingsByVendor.map(v=>v.vendorId)), [inventorySettingsByVendor]);
+  const availableInventoryVendors = useMemo(()=> vendors.filter(v=> !usedInventoryVendors.has(v.id)), [vendors, usedInventoryVendors]);
+  const addInventoryVendor = () => {
+    if(!inventoryPendingVendor) { toast.error('Select a vendor'); return; }
+    const vid = parseInt(inventoryPendingVendor);
+    if (usedInventoryVendors.has(vid)) { toast.error('Vendor already added'); return; }
+    setInventorySettingsByVendor(prev => ([...prev, { vendorId: vid, priceRanges: [{ from: "0", to: "MAX", multipliedWith: "" }] }]));
+    setInventoryPendingVendor("");
   };
-
-  const updatePriceRange = (index, field, value) => {
-    const numericValue = value.replace(/[^0-9.]/g, "");
-    setPriceSettings((prev) => ({
-      ...prev,
-      priceRanges: prev.priceRanges.map((range, i) =>
-        i === index ? { ...range, [field]: numericValue } : range
-      ),
-    }));
-  };
-
-  const removePriceRange = (index) => {
-    setPriceSettings((prev) => ({
-      ...prev,
-      priceRanges: prev.priceRanges.filter((_, i) => i !== index),
-    }));
-  };
-
-  // Inventory Settings Handlers
-  const updateInventorySettings = (field, value) => {
-    const numericValue = field !== "priceRanges" ? value.replace(/[^0-9.]/g, "") : value;
-    setInventorySettings((prev) => ({
-      ...prev,
-      [field]: numericValue,
-    }));
-  };
-
-  const addInventoryRange = () => {
-    const updatedRanges = [...inventorySettings.priceRanges];
-    const lastIndex = updatedRanges.length - 1;
-
-    const fromValue = updatedRanges[lastIndex].from || "0";
-    const toValue = fromValue ? (parseInt(fromValue) + 100).toString() : "100";
-
-    updatedRanges[lastIndex] = {
-      ...updatedRanges[lastIndex],
-      to: toValue,
-    };
-
-    setInventorySettings((prev) => ({
-      ...prev,
-      priceRanges: [...updatedRanges, { from: toValue, to: "MAX", multipliedWith: "" }],
-    }));
-  };
-
-  const updateInventoryRange = (index, field, value) => {
-    const numericValue = value.replace(/[^0-9.]/g, "");
-    setInventorySettings((prev) => ({
-      ...prev,
-      priceRanges: prev.priceRanges.map((range, i) =>
-        i === index ? { ...range, [field]: numericValue } : range
-      ),
-    }));
-  };
-
-  const removeInventoryRange = (index) => {
-    setInventorySettings((prev) => ({
-      ...prev,
-      priceRanges: prev.priceRanges.filter((_, i) => i !== index),
-    }));
-  };
+  const removeInventoryVendor = (vendorId) => setInventorySettingsByVendor(prev=> prev.filter(v=> v.vendorId!==vendorId));
+  const addInventoryRange = (vendorId) => setInventorySettingsByVendor(prev => prev.map(v=>{ if(v.vendorId!==vendorId) return v; const ranges=[...v.priceRanges]; const last=ranges[ranges.length-1]; const from= last.from || "0"; const to=(parseFloat(from||0)+100).toString(); ranges[ranges.length-1]={...last, to}; ranges.push({ from: to, to: "MAX", multipliedWith: ""}); return { ...v, priceRanges: ranges }; }));
+  const updateInventoryRange = (vendorId, idx, field, value) => setInventorySettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.map((r,i)=> i===idx ? { ...r, [field]: value.replace(/[^0-9.]/g, "") } : r)} : v));
+  const removeInventoryRangeRow = (vendorId, idx) => setInventorySettingsByVendor(prev => prev.map(v=> v.vendorId===vendorId ? { ...v, priceRanges: v.priceRanges.filter((_,i)=> i!==idx) } : v));
 
   // Navigation Handlers
   const goToNextStep = () => {
     if (activeStep === "store-info") {
-      if (!storeInfo.storeName || !storeInfo.marketplace || !storeInfo.apiKey) {
-        toast.error("Please fill in all required fields");
-        return;
-      }
+      if (!storeInfo.storeName || !storeInfo.marketplace) { toast.error("Please fill in all required fields"); return; }
       setActiveStep("price-settings");
     } else if (activeStep === "price-settings") {
+      // Validate contiguous price ranges per vendor
+      for (const v of priceSettingsByVendor) { if (!rangesAreContiguous(v.priceRanges)) { toast.error('Price ranges must be contiguous and end with MAX'); return; } }
       setActiveStep("inventory-settings");
     }
   };
@@ -191,25 +120,16 @@ export default function CreateStoreForm() {
   const handleSubmit = async () => {
     try {
       setLoading(true);
-      
-      // Validate required fields
-      if (!storeInfo.storeName || !storeInfo.marketplace || !storeInfo.apiKey) {
-        toast.error("Please fill in all required fields");
-        return;
-      }
-
-      const storeData = transformStoreDataForAPI(storeInfo, priceSettings, inventorySettings);
-      
+      // Validate contiguous inventory ranges per vendor
+      for (const v of inventorySettingsByVendor) { if (!rangesAreContiguous(v.priceRanges)) { toast.error('Inventory ranges must be contiguous and end with MAX'); return; } }
+      const storeData = transformStoreDataForAPI(storeInfo, priceSettingsByVendor, inventorySettingsByVendor);
       if (isEditMode && storeId !== null) {
-        // Update existing store
         await marketplaceAPI.updateStore(storeId, storeData);
         toast.success("Store updated successfully");
       } else {
-        // Create new store
         await marketplaceAPI.createStore(storeData);
         toast.success("Store created successfully");
       }
-
       navigate("/settings");
     } catch (err) {
       console.error('Error saving store:', err);
@@ -239,18 +159,11 @@ export default function CreateStoreForm() {
         <TabsContent value="store-info" className="space-y-6">
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">Store Information</h2>
-
             <div className="border rounded-md p-6 space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="storeName">Store Name</Label>
-                <Input
-                  id="storeName"
-                  placeholder="Enter your store name"
-                  value={storeInfo.storeName}
-                  onChange={(e) => updateStoreInfo("storeName", e.target.value)}
-                />
+                <Input id="storeName" placeholder="Enter your store name" value={storeInfo.storeName} onChange={(e) => updateStoreInfo("storeName", e.target.value)} />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="marketplace">Marketplace</Label>
                 <Select value={storeInfo.marketplace} onValueChange={(value) => updateStoreInfo("marketplace", value)}>
@@ -259,30 +172,18 @@ export default function CreateStoreForm() {
                   </SelectTrigger>
                   <SelectContent>
                     {marketplaces.map((mp) => (
-                      <SelectItem key={mp.id} value={mp.id.toString()}>
-                        {mp.name}
-                      </SelectItem>
+                      <SelectItem key={mp.id} value={mp.id.toString()}>{mp.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="apiKey">API Key</Label>
-                <Input
-                  id="apiKey"
-                  type="password"
-                  placeholder="Enter your marketplace API key"
-                  value={storeInfo.apiKey}
-                  onChange={(e) => updateStoreInfo("apiKey", e.target.value)}
-                />
-                <p className="text-sm text-gray-500">
-                  Your API key will be encrypted and stored securely
-                </p>
+                <Input id="apiKey" type="password" placeholder="Enter your marketplace API key" value={storeInfo.apiKey} onChange={(e) => updateStoreInfo("apiKey", e.target.value)} />
+                <p className="text-sm text-gray-500">Your API key will be encrypted and stored securely</p>
               </div>
             </div>
           </div>
-
           <div className="flex justify-end gap-4">
             <Button variant="outline" onClick={() => navigate("/settings")}>Cancel</Button>
             <Button onClick={goToNextStep}>Continue</Button>
@@ -293,114 +194,61 @@ export default function CreateStoreForm() {
         <TabsContent value="price-settings" className="space-y-6">
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">Price Settings</h2>
-
-            <div className="border rounded-md p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="purchaseTax">Purchase Tax (%)</Label>
-                  <Input
-                    id="purchaseTax"
-                    placeholder="Enter purchase tax"
-                    value={priceSettings.purchaseTax}
-                    onChange={(e) => updatePriceSettings("purchaseTax", e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="marketplaceFees">Marketplace Fees (%)</Label>
-                  <Input
-                    id="marketplaceFees"
-                    placeholder="Enter marketplace fees"
-                    value={priceSettings.marketplaceFees}
-                    onChange={(e) => updatePriceSettings("marketplaceFees", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h3 className="text-lg font-medium">Price Ranges</h3>
-
-                <div className="border rounded-md">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>From</TableHead>
-                        <TableHead>To</TableHead>
-                        <TableHead>Margin (%)</TableHead>
-                        <TableHead>Minimum Margin</TableHead>
-                        <TableHead>Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {priceSettings.priceRanges.map((range, index) => (
-                        <TableRow key={index}>
-                          <TableCell className="p-0">
-                            <Input
-                              type="text"
-                              value={range.from}
-                              onChange={(e) => updatePriceRange(index, "from", e.target.value)}
-                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell className="p-0">
-                            {index === priceSettings.priceRanges.length - 1 ? (
-                              <Input
-                                value="MAX"
-                                readOnly
-                                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-muted"
-                              />
-                            ) : (
-                              <Input
-                                type="text"
-                                value={range.to}
-                                onChange={(e) => updatePriceRange(index, "to", e.target.value)}
-                                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                                placeholder="100"
-                              />
-                            )}
-                          </TableCell>
-                          <TableCell className="p-0">
-                            <Input
-                              type="text"
-                              value={range.margin}
-                              onChange={(e) => updatePriceRange(index, "margin", e.target.value)}
-                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                              placeholder="30"
-                            />
-                          </TableCell>
-                          <TableCell className="p-0">
-                            <Input
-                              type="text"
-                              value={range.minimumMargin}
-                              onChange={(e) => updatePriceRange(index, "minimumMargin", e.target.value)}
-                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                              placeholder="25"
-                            />
-                          </TableCell>
-                          <TableCell className="p-0">
-                            <div className="flex gap-2">
-                              {priceSettings.priceRanges.length > 1 && (
-                                <Button onClick={() => removePriceRange(index)} variant="ghost" className="p-2">
-                                  <Trash2 className="w-4 h-4 text-red-500" />
-                                </Button>
-                              )}
-                              {index === priceSettings.priceRanges.length - 1 && (
-                                <Button onClick={addPriceRange} variant="ghost" className="p-2">
-                                  <Plus className="w-4 h-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
+            <div className="flex items-center gap-2">
+              <Select value={pricePendingVendor} onValueChange={setPricePendingVendor}>
+                <SelectTrigger className="w-64"><SelectValue placeholder="Select vendor" /></SelectTrigger>
+                <SelectContent>
+                  {availablePriceVendors.map(v => (<SelectItem key={v.id} value={v.id.toString()}>{v.name}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <Button size="icon" onClick={addPriceVendor}><Plus className="w-4 h-4" /></Button>
             </div>
+            {priceSettingsByVendor.map(v => (
+              <div key={v.vendorId} className="border rounded-md p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium">{vendors.find(x=>x.id===v.vendorId)?.name || `Vendor ${v.vendorId}`}</h3>
+                  <Button variant="outline" onClick={() => removePriceVendor(v.vendorId)}>Remove</Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label>Purchase Tax (%)</Label>
+                    <Input value={v.purchaseTax} onChange={(e)=> updatePriceVendorField(v.vendorId, 'purchaseTax', e.target.value)} placeholder="Enter purchase tax" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Marketplace Fees (%)</Label>
+                    <Input value={v.marketplaceFees} onChange={(e)=> updatePriceVendorField(v.vendorId, 'marketplaceFees', e.target.value)} placeholder="Enter marketplace fees" />
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Price Ranges</h3>
+                  <div className="border rounded-md">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>From</TableHead>
+                          <TableHead>To</TableHead>
+                          <TableHead>Margin (%)</TableHead>
+                          <TableHead>Minimum Margin</TableHead>
+                          <TableHead>Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {v.priceRanges.map((range, index) => (
+                          <TableRow key={index}>
+                            <TableCell className="p-0"><Input type="text" value={range.from} onChange={(e)=> updatePriceRange(v.vendorId, index, 'from', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="0" /></TableCell>
+                            <TableCell className="p-0">{index===v.priceRanges.length-1 ? (<Input value="MAX" readOnly className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-muted" />) : (<Input type="text" value={range.to} onChange={(e)=> updatePriceRange(v.vendorId, index, 'to', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="100" />)}</TableCell>
+                            <TableCell className="p-0"><Input type="text" value={range.margin} onChange={(e)=> updatePriceRange(v.vendorId, index, 'margin', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="30" /></TableCell>
+                            <TableCell className="p-0"><Input type="text" value={range.minimumMargin} onChange={(e)=> updatePriceRange(v.vendorId, index, 'minimumMargin', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="25" /></TableCell>
+                            <TableCell className="p-0"><div className="flex gap-2">{v.priceRanges.length>1 && (<Button onClick={()=> removePriceRangeRow(v.vendorId, index)} variant="ghost" className="p-2"><Trash2 className="w-4 h-4 text-red-500" /></Button>)}{index===v.priceRanges.length-1 && (<Button onClick={()=> addPriceRange(v.vendorId)} variant="ghost" className="p-2"><Plus className="w-4 h-4" /></Button>)}</div></TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-
           <div className="flex justify-end gap-4">
             <Button variant="outline" onClick={goToPreviousStep}>Back</Button>
             <Button onClick={goToNextStep}>Continue</Button>
@@ -410,82 +258,47 @@ export default function CreateStoreForm() {
         {/* Inventory Settings */}
         <TabsContent value="inventory-settings" className="space-y-6">
           <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Price Multiplier Ranges</h2>
-
-            <div className="border rounded-md">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>From</TableHead>
-                    <TableHead>To</TableHead>
-                    <TableHead>Multiplied with</TableHead>
-                    <TableHead>Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {inventorySettings.priceRanges.map((range, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="p-0">
-                        <Input
-                          type="text"
-                          value={range.from}
-                          onChange={(e) => updateInventoryRange(index, "from", e.target.value)}
-                          className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                          placeholder="0"
-                        />
-                      </TableCell>
-                      <TableCell className="p-0">
-                        {index === inventorySettings.priceRanges.length - 1 ? (
-                          <Input
-                            value="MAX"
-                            readOnly
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-muted"
-                          />
-                        ) : (
-                          <Input
-                            type="text"
-                            value={range.to}
-                            onChange={(e) => updateInventoryRange(index, "to", e.target.value)}
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                            placeholder="100"
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell className="p-0">
-                        <Input
-                          type="text"
-                          value={range.multipliedWith}
-                          onChange={(e) => updateInventoryRange(index, "multipliedWith", e.target.value)}
-                          className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                          placeholder="0.5"
-                        />
-                      </TableCell>
-                      <TableCell className="p-0">
-                        <div className="flex gap-2">
-                          {inventorySettings.priceRanges.length > 1 && (
-                            <Button onClick={() => removeInventoryRange(index)} variant="ghost" className="p-2">
-                              <Trash2 className="w-4 h-4 text-red-500" />
-                            </Button>
-                          )}
-                          {index === inventorySettings.priceRanges.length - 1 && (
-                            <Button onClick={addInventoryRange} variant="ghost" className="p-2">
-                              <Plus className="w-4 h-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <h2 className="text-xl font-semibold">Inventory Multiplier Ranges</h2>
+            <div className="flex items-center gap-2">
+              <Select value={inventoryPendingVendor} onValueChange={setInventoryPendingVendor}>
+                <SelectTrigger className="w-64"><SelectValue placeholder="Select vendor" /></SelectTrigger>
+                <SelectContent>
+                  {availableInventoryVendors.map(v => (<SelectItem key={v.id} value={v.id.toString()}>{v.name}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <Button size="icon" onClick={addInventoryVendor}><Plus className="w-4 h-4" /></Button>
             </div>
+            {inventorySettingsByVendor.map(v => (
+              <div key={v.vendorId} className="border rounded-md p-6 space-y-6">
+                <div className="flex items-center justify-between"><h3 className="font-medium">{vendors.find(x=>x.id===v.vendorId)?.name || `Vendor ${v.vendorId}`}</h3><Button variant="outline" onClick={()=> removeInventoryVendor(v.vendorId)}>Remove</Button></div>
+                <div className="border rounded-md">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>From</TableHead>
+                        <TableHead>To</TableHead>
+                        <TableHead>Multiplied with</TableHead>
+                        <TableHead>Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {v.priceRanges.map((range, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="p-0"><Input type="text" value={range.from} onChange={(e)=> updateInventoryRange(v.vendorId, index, 'from', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="0" /></TableCell>
+                          <TableCell className="p-0">{index===v.priceRanges.length-1 ? (<Input value="MAX" readOnly className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-muted" />) : (<Input type="text" value={range.to} onChange={(e)=> updateInventoryRange(v.vendorId, index, 'to', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="100" />)}</TableCell>
+                          <TableCell className="p-0"><Input type="text" value={range.multipliedWith} onChange={(e)=> updateInventoryRange(v.vendorId, index, 'multipliedWith', e.target.value)} className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0" placeholder="0.5" /></TableCell>
+                          <TableCell className="p-0"><div className="flex gap-2">{v.priceRanges.length>1 && (<Button onClick={()=> removeInventoryRangeRow(v.vendorId, index)} variant="ghost" className="p-2"><Trash2 className="w-4 h-4 text-red-500" /></Button>)}{index===v.priceRanges.length-1 && (<Button onClick={()=> addInventoryRange(v.vendorId)} variant="ghost" className="p-2"><Plus className="w-4 h-4" /></Button>)}</div></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ))}
           </div>
-
           <div className="flex justify-end gap-4">
             <Button variant="outline" onClick={goToPreviousStep}>Back</Button>
-            <Button onClick={handleSubmit} disabled={loading}>
-              {loading ? 'Saving...' : (isEditMode ? 'Update Store' : 'Create Store')}
-            </Button>
+            <Button onClick={handleSubmit} disabled={loading}>{loading ? 'Saving...' : (isEditMode ? 'Update Store' : 'Create Store')}</Button>
           </div>
         </TabsContent>
       </Tabs>

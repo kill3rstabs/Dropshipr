@@ -44,8 +44,9 @@ class PriceRange(models.Model):
         return f"{self.from_value} - {self.to_value}"
 
 class StorePriceSettings(models.Model):
-    """Store-specific price settings"""
-    store = models.OneToOneField(Store, on_delete=models.CASCADE, related_name="price_settings")
+    """Store- and vendor-specific price settings"""
+    store = models.ForeignKey('marketplace.Store', on_delete=models.CASCADE, related_name="price_settings_by_vendor")
+    vendor = models.ForeignKey('vendor.Vendor', on_delete=models.CASCADE, related_name="store_price_settings")
     purchase_tax_percentage = models.DecimalField(
         max_digits=5, 
         decimal_places=2, 
@@ -61,8 +62,11 @@ class StorePriceSettings(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        unique_together = [('store', 'vendor')]
+
     def __str__(self):
-        return f"Price settings for {self.store.name}"
+        return f"Price settings for {self.store.name} - {self.vendor.name}"
 
 class PriceRangeMargin(models.Model):
     """Price range with margin settings"""
@@ -87,13 +91,17 @@ class PriceRangeMargin(models.Model):
         return f"{self.price_range} - {self.margin_percentage}% margin"
 
 class StoreInventorySettings(models.Model):
-    """Store-specific inventory settings"""
-    store = models.OneToOneField(Store, on_delete=models.CASCADE, related_name="inventory_settings")
+    """Store- and vendor-specific inventory settings"""
+    store = models.ForeignKey('marketplace.Store', on_delete=models.CASCADE, related_name="inventory_settings_by_vendor")
+    vendor = models.ForeignKey('vendor.Vendor', on_delete=models.CASCADE, related_name="store_inventory_settings")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        unique_together = [('store', 'vendor')]
+
     def __str__(self):
-        return f"Inventory settings for {self.store.name}"
+        return f"Inventory settings for {self.store.name} - {self.vendor.name}"
 
 class InventoryRangeMultiplier(models.Model):
     """Inventory range with multiplier settings"""
