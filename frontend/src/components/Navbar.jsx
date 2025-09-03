@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import '../styles/Navbar.css';
 import Sidebar from './Sidebar';
-import { Search, User, Bell, Menu, Package } from 'lucide-react';
+import { User, Bell, Menu, Package } from 'lucide-react';
 
 const Navbar = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -39,24 +39,10 @@ const Navbar = () => {
                 <Package className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">Dropshipr</h1>
+                <h1 className="text-xl font-bold text-white">AutoEcomm</h1>
                 <p className="text-xs text-blue-100">Inventory Management</p>
               </div>
             </Link>
-          </div>
-
-          {/* Center Section - Search */}
-          <div className="flex-1 max-w-2xl mx-8">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search orders, products..."
-                className="w-full py-3 pl-12 pr-4 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-white/20 bg-white/10 text-white placeholder-blue-100"
-              />
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <Search className="h-5 w-5 text-blue-100" />
-              </div>
-            </div>
           </div>
 
           {/* Right Section */}
@@ -77,7 +63,7 @@ const Navbar = () => {
                   <User className="h-5 w-5" />
                 </div>
                 <div className="text-left">
-                  <p className="text-sm font-medium">John Doe</p>
+                  <p className="text-sm font-medium">Afraz Budhwani</p>
                   <p className="text-xs text-blue-100">Inventory Manager</p>
                 </div>
               </button>

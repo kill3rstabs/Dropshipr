@@ -34,7 +34,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                 <Package className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Dropshipr</h1>
+                <h1 className="text-xl font-bold text-gray-900">AutoEcomm</h1>
                 <p className="text-sm text-gray-600">Inventory Management</p>
               </div>
             </Link>
@@ -69,24 +69,6 @@ const Sidebar = ({ isOpen, onClose }) => {
               })}
             </div>
           </nav>
-
-          {/* Footer */}
-          <div className="p-6 border-t border-gray-200">
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="text-sm font-medium text-gray-900 mb-2">Quick Actions</h3>
-              <div className="space-y-2">
-                <button className="w-full text-left text-sm text-gray-600 hover:text-primary transition-colors">
-                  Create New Order
-                </button>
-                <button className="w-full text-left text-sm text-gray-600 hover:text-primary transition-colors">
-                  View Reports
-                </button>
-                <button className="w-full text-left text-sm text-gray-600 hover:text-primary transition-colors">
-                  Manage Inventory
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </>

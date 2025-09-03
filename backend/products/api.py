@@ -637,7 +637,7 @@ def send_scraping_complete_email(session_id: str, scraping_stats: dict, csv_file
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scraping Complete - Dropshipr</title>
+    <title>Scraping Complete - AutoEcomm</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; }
         .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
@@ -657,7 +657,7 @@ def send_scraping_complete_email(session_id: str, scraping_stats: dict, csv_file
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">Dropshipr</div>
+            <div class="logo">AutoEcomm</div>
             <h2>Scraping Job Complete</h2>
         </div>
 
@@ -677,7 +677,7 @@ def send_scraping_complete_email(session_id: str, scraping_stats: dict, csv_file
 
         {ATTACHMENT_SECTION}
 
-        <div class="footer"><p>This is an automated notification from Dropshipr.</p><p>If you have any questions, please contact support.</p></div>
+        <div class="footer"><p>This is an automated notification from AutoEcomm.</p><p>If you have any questions, please contact support.</p></div>
     </div>
 </body>
 </html>

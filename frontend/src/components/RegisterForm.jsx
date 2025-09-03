@@ -24,7 +24,7 @@ export function RegisterForm() {
             <Label htmlFor="name">Full Name</Label>
             <Input
               id="name"
-              placeholder="John Doe"
+              placeholder="Afraz Budhwani"
               type="text"
               autoCapitalize="words"
               autoComplete="name"
