@@ -6,6 +6,7 @@ import aiohttp
 import random
 import re
 import pytz
+import logging
 
 from django.db import transaction
 from django.utils import timezone
@@ -15,6 +16,8 @@ from .models import Product, Scrape
 from vendor.models import VendorPrice
 from .amazonau_rules import AmazonAUBusinessRules
 
+
+logger = logging.getLogger(__name__)
 
 class AmazonAUScrapper:
     AMAZONAU_MAX_CONCURRENT_REQUESTS = 10
@@ -31,6 +34,8 @@ class AmazonAUScrapper:
 
     @staticmethod
     def build_vendor_groups(products: List[Product]) -> Tuple[List[Product], Dict[int, List[int]]]:
+        start = timezone.now()
+        logger.info(f"Building vendor groups for {len(products)} AmazonAU products")
         key_to_ids: Dict[Tuple[int, str], List[int]] = defaultdict(list)
         rep_map: Dict[Tuple[int, str], Product] = {}
         for p in products:
@@ -40,6 +45,7 @@ class AmazonAUScrapper:
                 rep_map[key] = p
         reps = list(rep_map.values())
         rep_to_ids: Dict[int, List[int]] = {rep.id: key_to_ids[(rep.vendor_id, str(rep.vendor_sku).strip())] for rep in reps}
+        logger.info(f"Built {len(reps)} representative groups in {(timezone.now()-start).total_seconds():.2f}s")
         return reps, rep_to_ids
 
     @staticmethod
@@ -56,7 +62,8 @@ class AmazonAUScrapper:
                 import json as _json
                 json_data = _json.loads(price_div.get_text(strip=True))
                 main_price = json_data.get('desktop_buybox_group_1', [{}])[0].get('displayPrice', 'N/A')
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to parse hidden price JSON for {url}: {e}")
                 main_price = "N/A"
         if main_price == "N/A":
             visible_price = soup.select_one("#corePrice_feature_div span.a-offscreen")
@@ -112,31 +119,39 @@ class AmazonAUScrapper:
         error_output = ""
         details: Dict[str, Any] = {}
         if not url:
+            logger.warning(f"Product {product.id} missing vendor_sku; cannot build AmazonAU URL")
             return {'product_id': product.id, 'success': False, 'error_status': 'Missing vendor_sku for URL'}
         try:
+            start = timezone.now()
+            logger.info(f"Scrape start: product_id={product.id} sku={product.vendor_sku} retries={retries}")
             async with session.get(url, timeout=cls.AMAZONAU_TIMEOUT, headers=headers) as response:
                 text = await response.text()
-                if response.status >= 500:
-                    error_output = f"Status {response.status}"
+                status = response.status
+                logger.info(f"Scrape fetched: product_id={product.id} status={status} elapsed={(timezone.now()-start).total_seconds():.2f}s")
+                if status >= 500:
+                    error_output = f"Status {status}"
                 elif 'captcha' in text.lower() or 'enter the characters you see below' in text.lower():
                     error_output = "Blocked by CAPTCHA"
                 else:
                     soup = BeautifulSoup(text, 'html.parser')
                     details = cls.parse_amazonau_details_from_soup(soup, url)
         except asyncio.TimeoutError:
+            logger.warning(f"Timeout: product_id={product.id} attempt={retries+1}")
             if retries < cls.AMAZONAU_RETRY_LIMIT:
                 await asyncio.sleep(1 + retries)
                 return await cls.scrape_single(product, session, retries + 1)
             error_output = f"Request timed out for {url}"
         except aiohttp.ClientError as e:
+            logger.warning(f"ClientError: product_id={product.id} attempt={retries+1} error={e}")
             if retries < cls.AMAZONAU_RETRY_LIMIT:
                 await asyncio.sleep(1 + retries)
                 return await cls.scrape_single(product, session, retries + 1)
             error_output = f"Client error for {url}: {str(e)}"
         except Exception as e:
+            logger.error(f"Unexpected error: product_id={product.id} error={e}")
             error_output = f"Unexpected error for {url}: {str(e)}"
 
-        return {
+        result = {
             'product_id': product.id,
             'vendor_sku': product.vendor_sku,
             'url': url,
@@ -144,22 +159,33 @@ class AmazonAUScrapper:
             'error_status': error_output,
             **details
         }
+        logger.info(f"Scrape end: product_id={product.id} success={result['success']} error={error_output if error_output else 'none'}")
+        return result
 
     @classmethod
     async def process_batch(cls, products_batch: List[Product], session: aiohttp.ClientSession) -> List[Dict[str, Any]]:
+        logger.info(f"Batch scrape start for {len(products_batch)} representatives")
+        t0 = timezone.now()
         tasks = [cls.scrape_single(p, session) for p in products_batch]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        ok = sum(1 for r in results if r.get('success'))
+        logger.info(f"Batch scrape end: success={ok} failed={len(results)-ok} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
+        return results
 
     @classmethod
     @transaction.atomic
     def save_results(cls, results: List[Dict[str, Any]]) -> None:
+        logger.info(f"Saving {len(results)} AmazonAU results to DB")
         tz_now = timezone.now()
+        saved = 0
         for r in results:
             try:
                 product = Product.objects.get(id=r.get('product_id'))
             except Product.DoesNotExist:
+                logger.error(f"Save skip: product {r.get('product_id')} not found")
                 continue
-            except Exception:
+            except Exception as e:
+                logger.error(f"Save skip: error loading product {r.get('product_id')}: {e}")
                 continue
 
             processed = AmazonAUBusinessRules.process_scraped_data({
@@ -201,4 +227,6 @@ class AmazonAUScrapper:
                     'error_code': processed['error_details'],
                     'scraped_at': tz_now
                 }
-            ) 
+            )
+            saved += 1
+        logger.info(f"Saved {saved}/{len(results)} results to DB") 
