@@ -76,8 +76,15 @@ export default function StoreListingPage() {
     }
   };
 
-  const handleEditStore = (store) => {
-    navigate("/create-store", { state: { storeData: store } });
+  const handleEditStore = async (store) => {
+    try {
+      const full = await marketplaceAPI.getStore(store.id);
+      const transformed = transformStoreDataForFrontend(full);
+      navigate("/create-store", { state: { storeData: transformed } });
+    } catch (e) {
+      console.error('Error loading store details:', e);
+      toast.error('Failed to load store details');
+    }
   };
 
   const handleDeleteStore = async (id) => {
