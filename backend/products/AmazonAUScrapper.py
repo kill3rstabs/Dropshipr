@@ -16,6 +16,16 @@ from .models import Product, Scrape
 from vendor.models import VendorPrice
 from .amazonau_rules import AmazonAUBusinessRules
 
+# Selenium imports
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+
+# Amazon captcha solver
+from amazoncaptcha import AmazonCaptcha
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,75 +45,73 @@ class AmazonAUScrapper:
     ]
 
     @classmethod
-    async def _get_anti_csrf_token(cls, session: aiohttp.ClientSession) -> Optional[str]:
-        """Fetch homepage to capture cookies and extract anti CSRF token used by GLUX address AJAX."""
-        try:
-            headers = {
-                'User-Agent': random.choice(cls.AMAZON_USER_AGENTS),
-                'Accept-Language': 'en-AU,en;q=0.9',
-                'Cache-Control': 'no-cache',
-            }
-            url = f"{cls.AMAZON_AU_BASE}/"
-            t0 = timezone.now()
-            async with session.get(url, timeout=cls.AMAZONAU_TIMEOUT, headers=headers) as resp:
-                html = await resp.text()
-                logger.info(f"GLUX token GET / status={resp.status} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
-                if resp.status != 200:
-                    return None
-                soup = BeautifulSoup(html, 'html.parser')
-                meta = soup.find('meta', attrs={'name': 'anti-csrf-token-a2z'})
-                if not meta:
-                    # Some pages use 'anti-csrftoken-a2z'
-                    meta = soup.find('meta', attrs={'name': 'anti-csrftoken-a2z'})
-                token = meta.get('content') if meta else None
-                if token:
-                    logger.info("GLUX anti-csrf token extracted")
-                else:
-                    logger.warning("GLUX anti-csrf token not found on homepage")
-                return token
-        except Exception as e:
-            logger.error(f"Error acquiring GLUX token: {e}")
-            return None
+    def create_driver(cls) -> webdriver.Chrome:
+        options = Options()
+        # Headless is recommended in server
+        options.add_argument('--headless=new')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--window-size=1280,1696')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--start-maximized')
+        options.add_argument('--lang=en-AU')
+        # Stabilize
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_argument('--disable-infobars')
+        driver = webdriver.Chrome(options=options)
+        logger.info("Selenium Chrome driver created")
+        return driver
 
     @classmethod
-    async def setup_location_on_session(cls, session: aiohttp.ClientSession) -> bool:
-        """Attempt to set session shipping location to postal code 2762 using GLUX AJAX endpoint."""
+    def solve_captcha_if_present(cls, driver: webdriver.Chrome):
         try:
-            token = await cls._get_anti_csrf_token(session)
-            headers = {
-                'User-Agent': random.choice(cls.AMAZON_USER_AGENTS),
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language': 'en-AU,en;q=0.9',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': cls.AMAZON_AU_BASE,
-                'Referer': f"{cls.AMAZON_AU_BASE}/",
-            }
-            if token:
-                headers['anti-csrftoken-a2z'] = token
-            data = {
-                'locationType': 'LOCATION_INPUT',
-                'zipCode': cls.AMAZON_ZIP,           # observed param name variant
-                'postalCode': cls.AMAZON_ZIP,        # fallback param name variant
-                'district': '',
-                'countryCode': 'AU',
-                'storeContext': 'au',
-                'deviceType': 'desktop',
-                'pageType': 'Gateway',
-                'actionSource': 'glow',
-            }
-            url = f"{cls.AMAZON_AU_BASE}/gp/delivery/ajax/address-change.html"
-            t0 = timezone.now()
-            async with session.post(url, data=data, headers=headers, timeout=cls.AMAZONAU_TIMEOUT) as resp:
-                text = await resp.text()
-                elapsed = (timezone.now()-t0).total_seconds()
-                ok = resp.status == 200 and ('zipCode' in text or 'postalCode' in text or 'addressState' in text)
-                logger.info(f"GLUX location POST status={resp.status} ok={ok} elapsed={elapsed:.2f}s")
-                if not ok:
-                    logger.debug(f"GLUX response snippet: {text[:200]}")
-                return ok
+            img = driver.find_element(By.XPATH, "//div[@class='a-row a-text-center']//img")
+            link = img.get_attribute('src')
+            captcha = AmazonCaptcha.fromlink(link)
+            value = captcha.solve()
+            input_field = driver.find_element(By.ID, "captchacharacters")
+            input_field.clear()
+            input_field.send_keys(value)
+            button = driver.find_element(By.CLASS_NAME, "a-button-text")
+            button.click()
+            logger.info("Solved CAPTCHA via amazoncaptcha")
+        except Exception:
+            # No captcha or solver failed; continue silently
+            pass
+
+    @classmethod
+    def set_zip_code(cls, driver: webdriver.Chrome) -> bool:
+        try:
+            driver.get(cls.AMAZON_AU_BASE)
+            cls.solve_captcha_if_present(driver)
+            wait = WebDriverWait(driver, 15)
+            popover_trigger = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.a-popover-trigger")))
+            popover_trigger.click()
+            cls.solve_captcha_if_present(driver)
+
+            postal_code_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input.GLUX_Full_Width")))
+            postal_code_input.clear()
+            postal_code_input.send_keys(cls.AMAZON_ZIP)
+
+            apply_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
+            apply_button.click()
+
+            # City confirmation
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue")))
+
+            dropdown_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownButton span.a-button-text")))
+            dropdown_button.click()
+
+            dropdown_item = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a#GLUXPostalCodeWithCity_DropdownList_0")))
+            dropdown_item.click()
+
+            apply_button_again = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
+            apply_button_again.click()
+
+            logger.info(f"Selenium: Postal code set to {cls.AMAZON_ZIP}")
+            return True
         except Exception as e:
-            logger.error(f"Error setting GLUX location: {e}")
+            logger.error(f"Error setting postal code via Selenium: {e}")
             return False
 
     @staticmethod
@@ -182,73 +190,61 @@ class AmazonAUScrapper:
         }
 
     @classmethod
-    async def scrape_single(cls, product: Product, session: aiohttp.ClientSession, retries: int = 0) -> Dict[str, Any]:
+    def extract_data_with_driver(cls, url: str, driver: webdriver.Chrome) -> Dict[str, Any]:
+        try:
+            driver.get(url)
+            cls.solve_captcha_if_present(driver)
+            html = driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+            # Detect 500 errors
+            if 'HTTP ERROR 500' in html or 'Internal Server Error' in html:
+                return { 'error_status': 'Status 500' }
+            details = cls.parse_amazonau_details_from_soup(soup, url)
+            details['error_status'] = ''
+            return details
+        except Exception as e:
+            logger.error(f"Selenium extract error for {url}: {e}")
+            return { 'error_status': f"Exception: {e}" }
+
+    @classmethod
+    async def scrape_single(cls, product: Product, driver: webdriver.Chrome, retries: int = 0) -> Dict[str, Any]:
         url = cls.build_amazon_au_url(product)
-        headers = {
-            'User-Agent': random.choice(cls.AMAZON_USER_AGENTS),
-            'Accept-Language': 'en-AU,en;q=0.9',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        }
-        error_output = ""
-        details: Dict[str, Any] = {}
         if not url:
             logger.warning(f"Product {product.id} missing vendor_sku; cannot build AmazonAU URL")
             return {'product_id': product.id, 'success': False, 'error_status': 'Missing vendor_sku for URL'}
-        try:
-            start = timezone.now()
-            logger.info(f"Scrape start: product_id={product.id} sku={product.vendor_sku} retries={retries}")
-            async with session.get(url, timeout=cls.AMAZONAU_TIMEOUT, headers=headers) as response:
-                text = await response.text()
-                status = response.status
-                logger.info(f"Scrape fetched: product_id={product.id} status={status} elapsed={(timezone.now()-start).total_seconds():.2f}s")
-                if status >= 500:
-                    if retries < cls.AMAZONAU_RETRY_LIMIT - 1:
-                        delay = (2 ** retries) + random.uniform(0.5, 1.5)
-                        logger.warning(f"5xx server error for product_id={product.id} status={status}; retry {retries+1}/{cls.AMAZONAU_RETRY_LIMIT} after {delay:.2f}s")
-                        await asyncio.sleep(delay)
-                        return await cls.scrape_single(product, session, retries + 1)
-                    error_output = f"Status {status}"
-                elif 'captcha' in text.lower() or 'enter the characters you see below' in text.lower():
-                    error_output = "Blocked by CAPTCHA"
-                else:
-                    soup = BeautifulSoup(text, 'html.parser')
-                    details = cls.parse_amazonau_details_from_soup(soup, url)
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout: product_id={product.id} attempt={retries+1}")
-            if retries < cls.AMAZONAU_RETRY_LIMIT - 1:
-                delay = (2 ** retries) + random.uniform(0.5, 1.5)
-                await asyncio.sleep(delay)
-                return await cls.scrape_single(product, session, retries + 1)
-            error_output = f"Request timed out for {url}"
-        except aiohttp.ClientError as e:
-            logger.warning(f"ClientError: product_id={product.id} attempt={retries+1} error={e}")
-            if retries < cls.AMAZONAU_RETRY_LIMIT - 1:
-                delay = (2 ** retries) + random.uniform(0.5, 1.5)
-                await asyncio.sleep(delay)
-                return await cls.scrape_single(product, session, retries + 1)
-            error_output = f"Client error for {url}: {str(e)}"
-        except Exception as e:
-            logger.error(f"Unexpected error: product_id={product.id} error={e}")
-            error_output = f"Unexpected error for {url}: {str(e)}"
 
+        logger.info(f"Scrape start: product_id={product.id} sku={product.vendor_sku} retries={retries}")
+        data = cls.extract_data_with_driver(url, driver)
+        error_output = data.get('error_status') or ''
+
+        # Retry on server errors/timeouts markers
+        if error_output.startswith('Status 500') and retries < cls.AMAZONAU_RETRY_LIMIT - 1:
+            delay = (2 ** retries) + random.uniform(0.5, 1.5)
+            logger.warning(f"5xx server error for product_id={product.id}; retry {retries+1}/{cls.AMAZONAU_RETRY_LIMIT} after {delay:.2f}s")
+            await asyncio.sleep(delay)
+            return await cls.scrape_single(product, driver, retries + 1)
+
+        success = not bool(error_output)
         result = {
             'product_id': product.id,
             'vendor_sku': product.vendor_sku,
             'url': url,
-            'success': not bool(error_output),
+            'success': success,
             'error_status': error_output,
-            **details
         }
-        logger.info(f"Scrape end: product_id={product.id} success={result['success']} error={error_output if error_output else 'none'}")
+        if success:
+            result.update(data)
+        logger.info(f"Scrape end: product_id={product.id} success={success} error={error_output if error_output else 'none'}")
         return result
 
     @classmethod
-    async def process_batch(cls, products_batch: List[Product], session: aiohttp.ClientSession) -> List[Dict[str, Any]]:
-        logger.info(f"Batch scrape start for {len(products_batch)} representatives")
+    async def process_batch(cls, products_batch: List[Product], driver: webdriver.Chrome) -> List[Dict[str, Any]]:
+        logger.info(f"Batch scrape start for {len(products_batch)} representatives (selenium)")
         t0 = timezone.now()
-        tasks = [cls.scrape_single(p, session) for p in products_batch]
-        results = await asyncio.gather(*tasks)
+        results: List[Dict[str, Any]] = []
+        for p in products_batch:
+            res = await cls.scrape_single(p, driver)
+            results.append(res)
         ok = sum(1 for r in results if r.get('success'))
         logger.info(f"Batch scrape end: success={ok} failed={len(results)-ok} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
         return results
@@ -267,6 +263,17 @@ class AmazonAUScrapper:
                 continue
             except Exception as e:
                 logger.error(f"Save skip: error loading product {r.get('product_id')}: {e}")
+                continue
+
+            # If no success, at least log the error scrape
+            if not r.get('success'):
+                Scrape.objects.create(
+                    product=product,
+                    scrape_time=tz_now,
+                    raw_response=r,
+                    error_code=r.get('error_status',''),
+                    error_details=r.get('error_status','')
+                )
                 continue
 
             processed = AmazonAUBusinessRules.process_scraped_data({

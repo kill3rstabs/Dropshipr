@@ -2577,17 +2577,15 @@ async def run_amazonau_scraping_job(session_id: str):
         reps, rep_to_ids = AmazonAUScrapper.build_vendor_groups(products)
         total_unique = len(reps)
 
-        connector = aiohttp.TCPConnector(limit=AmazonAUScrapper.AMAZONAU_MAX_CONCURRENT_REQUESTS, force_close=True)
-        async with aiohttp.ClientSession(connector=connector, timeout=AmazonAUScrapper.AMAZONAU_TIMEOUT) as session:
-            try:
-                ok = await AmazonAUScrapper.setup_location_on_session(session)
-                logger.info(f"GLUX location set result: {ok}")
-            except Exception as se:
-                logger.error(f"GLUX setup error (non-fatal): {se}")
+        driver = AmazonAUScrapper.create_driver()
+        try:
+            if not AmazonAUScrapper.set_zip_code(driver):
+                logger.warning("Selenium: failed to set ZIP; continuing anyway")
+
             total_processed = 0
             for i in range(0, total_unique, AmazonAUScrapper.AMAZONAU_BATCH_SIZE):
                 reps_batch = reps[i:i + AmazonAUScrapper.AMAZONAU_BATCH_SIZE]
-                batch_results = await AmazonAUScrapper.process_batch(reps_batch, session)
+                batch_results = await AmazonAUScrapper.process_batch(reps_batch, driver)
 
                 expanded = []
                 for r in batch_results:
@@ -2600,6 +2598,11 @@ async def run_amazonau_scraping_job(session_id: str):
                 await sync_to_async(AmazonAUScrapper.save_results)(expanded)
                 total_processed += len(expanded)
                 logger.info(f"AmazonAU progress: {total_processed}/{total_products}")
+        finally:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
         duration = timezone.now() - start_time
         logger.info(f"=== AMAZONAU SCRAPING JOB COMPLETE === Session: {session_id}, duration: {duration}")
