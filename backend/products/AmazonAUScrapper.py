@@ -44,6 +44,8 @@ class AmazonAUScrapper:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
     ]
 
+    ADDRESS_EDIT_PATH = "/gp/glow/get-address-selections.html"
+
     @classmethod
     def create_driver(cls) -> webdriver.Chrome:
         options = Options()
@@ -107,13 +109,27 @@ class AmazonAUScrapper:
                 pass
 
             # Open location popover - use the provided ID
+            opened = False
             try:
                 link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#nav-global-location-popover-link")))
                 cls._safe_click(driver, link)
+                opened = True
             except Exception as e:
                 logger.warning(f"Selenium: location popover link not clickable: {e}")
 
             cls.solve_captcha_if_present(driver)
+
+            # If popover didn't open, navigate directly to the address editor page as fallback
+            if not opened:
+                addr_url = f"{cls.AMAZON_AU_BASE}{cls.ADDRESS_EDIT_PATH}"
+                logger.info(f"Selenium: using address editor fallback: {addr_url}")
+                driver.get(addr_url)
+                cls.solve_captcha_if_present(driver)
+                try:
+                    consent2 = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#sp-cc-accept, input#sp-cc-accept, button#sp-cc-accept")))
+                    cls._safe_click(driver, consent2)
+                except Exception:
+                    pass
 
             # Input: use explicit ID first, then fallbacks
             input_candidates = [
@@ -130,7 +146,7 @@ class AmazonAUScrapper:
                     continue
 
             if not zip_input:
-                # Already set zip? check city value exists
+                # Already set zip? check city value/header exists
                 try:
                     line2 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#glow-ingress-line2")))
                     logger.info(f"Selenium: location line2 present: {line2.text}")
