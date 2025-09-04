@@ -2598,6 +2598,26 @@ async def run_amazonau_scraping_job(session_id: str):
 
         duration = timezone.now() - start_time
         logger.info(f"=== AMAZONAU SCRAPING JOB COMPLETE === Session: {session_id}, duration: {duration}")
+        
+        # Generate system products CSV and send completion email
+        try:
+            csv_file_path = generate_system_products_csv()
+            scraping_stats = {
+                'total_products': total_products,
+                'successful_scrapes': total_processed,
+                'failed_scrapes': 0 if total_products == 0 else max(0, total_products - total_processed),
+                'success_rate': (total_processed/total_products)*100 if total_products > 0 else 0,
+                'duration': duration
+            }
+            email_success = await asyncio.to_thread(
+                send_scraping_complete_email, session_id, scraping_stats, csv_file_path
+            )
+            if email_success:
+                logger.info("SUCCESS: AmazonAU scraping completion email sent successfully")
+            else:
+                logger.error("ERROR: Failed to send AmazonAU scraping completion email")
+        except Exception as email_error:
+            logger.error(f"Error sending AmazonAU scraping completion email: {email_error}")
     except Exception as e:
         logger.error(f"AmazonAU job error: {e}", exc_info=True)
 
