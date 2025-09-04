@@ -80,41 +80,115 @@ class AmazonAUScrapper:
             pass
 
     @classmethod
+    def _safe_click(cls, driver, elem):
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elem)
+            try:
+                elem.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", elem)
+            return True
+        except Exception:
+            return False
+
+    @classmethod
     def set_zip_code(cls, driver: webdriver.Chrome) -> bool:
         try:
             driver.get(cls.AMAZON_AU_BASE)
             cls.solve_captcha_if_present(driver)
-            wait = WebDriverWait(driver, 15)
-            popover_trigger = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.a-popover-trigger")))
-            popover_trigger.click()
+            wait = WebDriverWait(driver, 20)
+
+            # Accept cookie banner if present
+            try:
+                consent = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#sp-cc-accept, input#sp-cc-accept, button#sp-cc-accept")))
+                cls._safe_click(driver, consent)
+                logger.info("Selenium: accepted cookie consent")
+            except Exception:
+                pass
+
+            # Open location popover - prefer nav link
+            opened = False
+            for sel in ["#nav-global-location-popover-link", "a.a-popover-trigger"]:
+                try:
+                    link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+                    if cls._safe_click(driver, link):
+                        opened = True
+                        break
+                except Exception:
+                    continue
+            if not opened:
+                logger.warning("Selenium: location popover link not clickable")
+
             cls.solve_captcha_if_present(driver)
-            # Wait for the postal code input to be visible
-            postal_code_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input.GLUX_Full_Width"))
-            )
-            postal_code_input.clear()
-            postal_code_input.send_keys("2762")
-            time.sleep(random.uniform(1, 3))
 
-            apply_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
-            apply_button.click()
+            # Possible inputs
+            input_candidates = [
+                (By.CSS_SELECTOR, "#GLUXZipUpdateInput"),
+                (By.CSS_SELECTOR, "input.GLUX_Full_Width"),
+            ]
 
-            # City confirmation
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue")))
+            zip_input = None
+            for by, sel in input_candidates:
+                try:
+                    zip_input = wait.until(EC.presence_of_element_located((by, sel)))
+                    break
+                except Exception:
+                    continue
 
-            dropdown_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownButton span.a-button-text")))
-            dropdown_button.click()
+            if not zip_input:
+                # Already set zip? check city value exists
+                try:
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue")))
+                    logger.info("Selenium: postcode dialog not shown; assuming already set")
+                    return True
+                except Exception:
+                    logger.error("Selenium: postcode input not found")
+                    return False
 
-            dropdown_item = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a#GLUXPostalCodeWithCity_DropdownList_0")))
-            dropdown_item.click()
+            zip_input.clear()
+            zip_input.send_keys(cls.AMAZON_ZIP)
 
-            apply_button_again = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
-            apply_button_again.click()
+            # Apply button variants
+            applied = False
+            for sel in [
+                "#GLUXPostalCodeWithCityApplyButton input",
+                "#GLUXZipUpdate input",
+                "#GLUXZipUpdate a.a-button-close",
+                "#GLUXPostalCodeWithCityApplyButton .a-button-input",
+            ]:
+                try:
+                    btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+                    if cls._safe_click(driver, btn):
+                        applied = True
+                        break
+                except Exception:
+                    continue
+
+            if not applied:
+                logger.warning("Selenium: apply button not found; trying Enter key")
+                try:
+                    zip_input.send_keys("\n")
+                    applied = True
+                except Exception:
+                    pass
+
+            # Confirm applied: wait for city value or header to reflect location
+            try:
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue, #glow-ingress-line2")))
+            except Exception:
+                # Retry sequence once more
+                logger.warning("Selenium: postcode confirmation not visible, retrying sequence")
+                return cls.set_zip_code(driver)
 
             logger.info(f"Selenium: Postal code set to {cls.AMAZON_ZIP}")
             return True
         except Exception as e:
-            logger.error(f"Error setting postal code via Selenium: {e}")
+            # Dump minimal debug info
+            try:
+                title = driver.title
+            except Exception:
+                title = "<no title>"
+            logger.error(f"Error setting postal code via Selenium: {e} | title={title}")
             return False
 
     @staticmethod
