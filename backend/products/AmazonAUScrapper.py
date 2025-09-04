@@ -106,24 +106,18 @@ class AmazonAUScrapper:
             except Exception:
                 pass
 
-            # Open location popover - prefer nav link
-            opened = False
-            for sel in ["#nav-global-location-popover-link", "a.a-popover-trigger"]:
-                try:
-                    link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
-                    if cls._safe_click(driver, link):
-                        opened = True
-                        break
-                except Exception:
-                    continue
-            if not opened:
-                logger.warning("Selenium: location popover link not clickable")
+            # Open location popover - use the provided ID
+            try:
+                link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#nav-global-location-popover-link")))
+                cls._safe_click(driver, link)
+            except Exception as e:
+                logger.warning(f"Selenium: location popover link not clickable: {e}")
 
             cls.solve_captcha_if_present(driver)
 
-            # Possible inputs
+            # Input: use explicit ID first, then fallbacks
             input_candidates = [
-                (By.CSS_SELECTOR, "#GLUXZipUpdateInput"),
+                (By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_PostalCodeInput"),
                 (By.CSS_SELECTOR, "input.GLUX_Full_Width"),
             ]
 
@@ -138,8 +132,8 @@ class AmazonAUScrapper:
             if not zip_input:
                 # Already set zip? check city value exists
                 try:
-                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue")))
-                    logger.info("Selenium: postcode dialog not shown; assuming already set")
+                    line2 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#glow-ingress-line2")))
+                    logger.info(f"Selenium: location line2 present: {line2.text}")
                     return True
                 except Exception:
                     logger.error("Selenium: postcode input not found")
@@ -148,12 +142,25 @@ class AmazonAUScrapper:
             zip_input.clear()
             zip_input.send_keys(cls.AMAZON_ZIP)
 
+            # Click the city dropdown and select first option
+            try:
+                drop_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownButton")))
+                cls._safe_click(driver, drop_btn)
+                # First option by explicit ID
+                try:
+                    first_opt = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownList_0")))
+                except Exception:
+                    # Fallback: first anchor inside the popover dropdown menu
+                    first_opt = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".a-popover-wrapper .a-popover-inner .a-dropdown-container li a, .a-popover-wrapper .a-popover-inner ul li a")))
+                cls._safe_click(driver, first_opt)
+                logger.info("Selenium: selected first city option")
+            except Exception as e:
+                logger.warning(f"Selenium: could not select city option: {e}")
+
             # Apply button variants
             applied = False
             for sel in [
                 "#GLUXPostalCodeWithCityApplyButton input",
-                "#GLUXZipUpdate input",
-                "#GLUXZipUpdate a.a-button-close",
                 "#GLUXPostalCodeWithCityApplyButton .a-button-input",
             ]:
                 try:
@@ -172,12 +179,12 @@ class AmazonAUScrapper:
                 except Exception:
                     pass
 
-            # Confirm applied: wait for city value or header to reflect location
+            # Confirm applied: wait for header to reflect location
             try:
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue, #glow-ingress-line2")))
+                line2 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#glow-ingress-line2")))
+                logger.info(f"Selenium: line2 now: {line2.text}")
             except Exception:
-                # Retry sequence once more
-                logger.warning("Selenium: postcode confirmation not visible, retrying sequence")
+                logger.warning("Selenium: postcode confirmation not visible, retrying sequence once")
                 return cls.set_zip_code(driver)
 
             logger.info(f"Selenium: Postal code set to {cls.AMAZON_ZIP}")
