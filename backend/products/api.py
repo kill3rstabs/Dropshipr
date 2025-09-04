@@ -2606,7 +2606,7 @@ async def run_amazonau_scraping_job(session_id: str):
         
         # Generate system products CSV and send completion email
         try:
-            csv_file_path = generate_system_products_csv()
+            csv_file_path = await asyncio.to_thread(generate_system_products_csv)
             scraping_stats = {
                 'total_products': total_products,
                 'successful_scrapes': total_processed,
