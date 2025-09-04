@@ -2553,14 +2553,14 @@ def get_upload_status(request, upload_id: int):
 @sync_to_async
 def get_amazonau_products_count():
     return Product.objects.filter(
-        marketplace__code='AmazonAU',
+        vendor__name='AmazonAU',
         store__is_active=True
     ).count()
 
 @sync_to_async
 def get_amazonau_products():
     return list(Product.objects.filter(
-        marketplace__code='AmazonAU',
+        vendor__name='AmazonAU',
         store__is_active=True
     ))
 
@@ -2644,7 +2644,7 @@ async def scrape_amazonau_products(request):
         session_id = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         total_products = await get_amazonau_products_count()
         if total_products == 0:
-            return {"success": False, "error": "No products found for AmazonAU marketplace", "products_queued": 0}
+            return {"success": False, "error": "No products found for AmazonAU Vendor", "products_queued": 0}
         log_path = start_detached_amazon_scrape(session_id)
         return {
             "success": True,
