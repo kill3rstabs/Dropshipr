@@ -631,7 +631,7 @@ def send_scraping_complete_email(session_id: str, scraping_stats: dict, csv_file
     """
     try:
         if not recipient_email:
-            recipient_email = os.getenv('DEFAULT_NOTIFICATION_EMAIL', 'nashitnoorali78@gmail.com')
+            recipient_email = os.getenv('DEFAULT_NOTIFICATION_EMAIL', 'afraaz.prettyandpractical@gmail.com')
         
         # HTML email template for scraping completion
         html_template = """
@@ -760,7 +760,7 @@ def send_upload_notification_email(upload_data: dict, recipient_email: str = Non
     try:
         if not recipient_email:
             # Default email - you can get this from user profile or settings
-            recipient_email = os.getenv('DEFAULT_NOTIFICATION_EMAIL', 'nashitnoorali78@gmail.com')
+            recipient_email = os.getenv('DEFAULT_NOTIFICATION_EMAIL', 'afraaz.prettyandpractical@gmail.com')
         
         # Read HTML template from file
         template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', 'email_upload_complete.html')
@@ -2579,6 +2579,11 @@ async def run_amazonau_scraping_job(session_id: str):
 
         connector = aiohttp.TCPConnector(limit=AmazonAUScrapper.AMAZONAU_MAX_CONCURRENT_REQUESTS, force_close=True)
         async with aiohttp.ClientSession(connector=connector, timeout=AmazonAUScrapper.AMAZONAU_TIMEOUT) as session:
+            try:
+                ok = await AmazonAUScrapper.setup_location_on_session(session)
+                logger.info(f"GLUX location set result: {ok}")
+            except Exception as se:
+                logger.error(f"GLUX setup error (non-fatal): {se}")
             total_processed = 0
             for i in range(0, total_unique, AmazonAUScrapper.AMAZONAU_BATCH_SIZE):
                 reps_batch = reps[i:i + AmazonAUScrapper.AMAZONAU_BATCH_SIZE]

@@ -24,6 +24,8 @@ class AmazonAUScrapper:
     AMAZONAU_BATCH_SIZE = 25
     AMAZONAU_TIMEOUT = aiohttp.ClientTimeout(total=30)
     AMAZONAU_RETRY_LIMIT = 2
+    AMAZON_AU_BASE = "https://www.amazon.com.au"
+    AMAZON_ZIP = "2762"
 
     AMAZON_USER_AGENTS = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -31,6 +33,78 @@ class AmazonAUScrapper:
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
     ]
+
+    @classmethod
+    async def _get_anti_csrf_token(cls, session: aiohttp.ClientSession) -> Optional[str]:
+        """Fetch homepage to capture cookies and extract anti CSRF token used by GLUX address AJAX."""
+        try:
+            headers = {
+                'User-Agent': random.choice(cls.AMAZON_USER_AGENTS),
+                'Accept-Language': 'en-AU,en;q=0.9',
+                'Cache-Control': 'no-cache',
+            }
+            url = f"{cls.AMAZON_AU_BASE}/"
+            t0 = timezone.now()
+            async with session.get(url, timeout=cls.AMAZONAU_TIMEOUT, headers=headers) as resp:
+                html = await resp.text()
+                logger.info(f"GLUX token GET / status={resp.status} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
+                if resp.status != 200:
+                    return None
+                soup = BeautifulSoup(html, 'html.parser')
+                meta = soup.find('meta', attrs={'name': 'anti-csrf-token-a2z'})
+                if not meta:
+                    # Some pages use 'anti-csrftoken-a2z'
+                    meta = soup.find('meta', attrs={'name': 'anti-csrftoken-a2z'})
+                token = meta.get('content') if meta else None
+                if token:
+                    logger.info("GLUX anti-csrf token extracted")
+                else:
+                    logger.warning("GLUX anti-csrf token not found on homepage")
+                return token
+        except Exception as e:
+            logger.error(f"Error acquiring GLUX token: {e}")
+            return None
+
+    @classmethod
+    async def setup_location_on_session(cls, session: aiohttp.ClientSession) -> bool:
+        """Attempt to set session shipping location to postal code 2762 using GLUX AJAX endpoint."""
+        try:
+            token = await cls._get_anti_csrf_token(session)
+            headers = {
+                'User-Agent': random.choice(cls.AMAZON_USER_AGENTS),
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'en-AU,en;q=0.9',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': cls.AMAZON_AU_BASE,
+                'Referer': f"{cls.AMAZON_AU_BASE}/",
+            }
+            if token:
+                headers['anti-csrftoken-a2z'] = token
+            data = {
+                'locationType': 'LOCATION_INPUT',
+                'zipCode': cls.AMAZON_ZIP,           # observed param name variant
+                'postalCode': cls.AMAZON_ZIP,        # fallback param name variant
+                'district': '',
+                'countryCode': 'AU',
+                'storeContext': 'au',
+                'deviceType': 'desktop',
+                'pageType': 'Gateway',
+                'actionSource': 'glow',
+            }
+            url = f"{cls.AMAZON_AU_BASE}/gp/delivery/ajax/address-change.html"
+            t0 = timezone.now()
+            async with session.post(url, data=data, headers=headers, timeout=cls.AMAZONAU_TIMEOUT) as resp:
+                text = await resp.text()
+                elapsed = (timezone.now()-t0).total_seconds()
+                ok = resp.status == 200 and ('zipCode' in text or 'postalCode' in text or 'addressState' in text)
+                logger.info(f"GLUX location POST status={resp.status} ok={ok} elapsed={elapsed:.2f}s")
+                if not ok:
+                    logger.debug(f"GLUX response snippet: {text[:200]}")
+                return ok
+        except Exception as e:
+            logger.error(f"Error setting GLUX location: {e}")
+            return False
 
     @staticmethod
     def build_vendor_groups(products: List[Product]) -> Tuple[List[Product], Dict[int, List[int]]]:
