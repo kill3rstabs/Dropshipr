@@ -23,7 +23,7 @@ class AmazonAUScrapper:
     AMAZONAU_MAX_CONCURRENT_REQUESTS = 10
     AMAZONAU_BATCH_SIZE = 25
     AMAZONAU_TIMEOUT = aiohttp.ClientTimeout(total=30)
-    AMAZONAU_RETRY_LIMIT = 2
+    AMAZONAU_RETRY_LIMIT = 5
     AMAZON_AU_BASE = "https://www.amazon.com.au"
     AMAZON_ZIP = "2762"
 
@@ -203,6 +203,11 @@ class AmazonAUScrapper:
                 status = response.status
                 logger.info(f"Scrape fetched: product_id={product.id} status={status} elapsed={(timezone.now()-start).total_seconds():.2f}s")
                 if status >= 500:
+                    if retries < cls.AMAZONAU_RETRY_LIMIT - 1:
+                        delay = (2 ** retries) + random.uniform(0.5, 1.5)
+                        logger.warning(f"5xx server error for product_id={product.id} status={status}; retry {retries+1}/{cls.AMAZONAU_RETRY_LIMIT} after {delay:.2f}s")
+                        await asyncio.sleep(delay)
+                        return await cls.scrape_single(product, session, retries + 1)
                     error_output = f"Status {status}"
                 elif 'captcha' in text.lower() or 'enter the characters you see below' in text.lower():
                     error_output = "Blocked by CAPTCHA"
@@ -211,14 +216,16 @@ class AmazonAUScrapper:
                     details = cls.parse_amazonau_details_from_soup(soup, url)
         except asyncio.TimeoutError:
             logger.warning(f"Timeout: product_id={product.id} attempt={retries+1}")
-            if retries < cls.AMAZONAU_RETRY_LIMIT:
-                await asyncio.sleep(1 + retries)
+            if retries < cls.AMAZONAU_RETRY_LIMIT - 1:
+                delay = (2 ** retries) + random.uniform(0.5, 1.5)
+                await asyncio.sleep(delay)
                 return await cls.scrape_single(product, session, retries + 1)
             error_output = f"Request timed out for {url}"
         except aiohttp.ClientError as e:
             logger.warning(f"ClientError: product_id={product.id} attempt={retries+1} error={e}")
-            if retries < cls.AMAZONAU_RETRY_LIMIT:
-                await asyncio.sleep(1 + retries)
+            if retries < cls.AMAZONAU_RETRY_LIMIT - 1:
+                delay = (2 ** retries) + random.uniform(0.5, 1.5)
+                await asyncio.sleep(delay)
                 return await cls.scrape_single(product, session, retries + 1)
             error_output = f"Client error for {url}: {str(e)}"
         except Exception as e:
