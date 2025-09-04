@@ -22,7 +22,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-
+import time
 # Amazon captcha solver
 from amazoncaptcha import AmazonCaptcha
 
@@ -88,10 +88,13 @@ class AmazonAUScrapper:
             popover_trigger = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.a-popover-trigger")))
             popover_trigger.click()
             cls.solve_captcha_if_present(driver)
-
-            postal_code_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input.GLUX_Full_Width")))
+            # Wait for the postal code input to be visible
+            postal_code_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input.GLUX_Full_Width"))
+            )
             postal_code_input.clear()
-            postal_code_input.send_keys(cls.AMAZON_ZIP)
+            postal_code_input.send_keys("2762")
+            time.sleep(random.uniform(1, 3))
 
             apply_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
             apply_button.click()
