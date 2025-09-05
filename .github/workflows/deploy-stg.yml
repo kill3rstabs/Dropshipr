@@ -35,28 +35,28 @@ jobs:
 
             # write .env.stg from secrets
             cat > .env.stg << 'EOF'
-              APP_DOMAIN=stg.autoecomm.wesolucions.com
-              N8N_DOMAIN=${{ secrets.N8N_DOMAIN }}
-              LETS_ENCRYPT_EMAIL=${{ secrets.LETS_ENCRYPT_EMAIL }}
+            APP_DOMAIN=stg.autoecomm.wesolucions.com
+            N8N_DOMAIN=${{ secrets.N8N_DOMAIN }}
+            LETS_ENCRYPT_EMAIL=${{ secrets.LETS_ENCRYPT_EMAIL }}
 
-              DJANGO_SECRET_KEY=${{ secrets.STG_DJANGO_SECRET_KEY }}
-              DJANGO_SETTINGS_MODULE=api.settings
-              DB_HOST=${{ secrets.DB_HOST }}
-              DB_NAME=${{ secrets.DB_NAME }}
-              DB_USER=${{ secrets.DB_USER }}
-              DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-              ALLOWED_HOSTS=autoecomm.wesolucions.com,stg.autoecomm.wesolucions.com
-              CSRF_TRUSTED_ORIGINS=https://autoecomm.wesolucions.com,https://stg.autoecomm.wesolucions.com
-              DEBUG=${{ secrets.STG_DEBUG }}
+            DJANGO_SECRET_KEY=${{ secrets.STG_DJANGO_SECRET_KEY }}
+            DJANGO_SETTINGS_MODULE=api.settings
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            ALLOWED_HOSTS=autoecomm.wesolucions.com,stg.autoecomm.wesolucions.com
+            CSRF_TRUSTED_ORIGINS=https://autoecomm.wesolucions.com,https://stg.autoecomm.wesolucions.com
+            DEBUG=${{ secrets.STG_DEBUG }}
 
-              N8N_HOST=${{ secrets.N8N_DOMAIN }}
-              N8N_PROTOCOL=https
-              N8N_PORT=5678
-              WEBHOOK_URL=https://${{ secrets.N8N_DOMAIN }}/
-              N8N_ENCRYPTION_KEY=${{ secrets.N8N_ENCRYPTION_KEY }}
+            N8N_HOST=${{ secrets.N8N_DOMAIN }}
+            N8N_PROTOCOL=https
+            N8N_PORT=5678
+            WEBHOOK_URL=https://${{ secrets.N8N_DOMAIN }}/
+            N8N_ENCRYPTION_KEY=${{ secrets.N8N_ENCRYPTION_KEY }}
 
-              TZ=${{ secrets.TZ }}
-              EOF
+            TZ=${{ secrets.TZ }}
+            EOF
 
             docker compose pull
             docker compose build --pull web-stg
