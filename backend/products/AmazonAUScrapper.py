@@ -176,7 +176,8 @@ class AmazonAUScrapper:
                 logger.info("Selenium: accepted cookie consent")
             except Exception:
                 pass
-
+            
+            time.sleep(20)
             # Look for location selector on product page - try multiple selectors
             location_selectors = [
                 "#contextualIngressPt",  # Common location selector on product pages
