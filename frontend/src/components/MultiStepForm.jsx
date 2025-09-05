@@ -415,7 +415,11 @@ export default function CreateStoreForm() {
                 <Select value={duplicateModal.toVendorId} onValueChange={(value)=> setDuplicateModal(prev=> ({ ...prev, toVendorId: value }))}>
                   <SelectTrigger className="w-full"><SelectValue placeholder="Select target vendor" /></SelectTrigger>
                   <SelectContent>
-                    {vendors.map(v => (
+                    {vendors.filter(v => {
+                      // Filter out vendors that already have settings for this type
+                      const existingSettings = duplicateModal.type === 'price' ? priceSettingsByVendor : inventorySettingsByVendor;
+                      return !existingSettings.some(setting => setting.vendorId === v.id);
+                    }).map(v => (
                       <SelectItem key={v.id} value={v.id.toString()}>{v.name}</SelectItem>
                     ))}
                   </SelectContent>
