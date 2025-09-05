@@ -108,37 +108,28 @@ class AmazonAUScrapper:
             except Exception:
                 pass
 
-            # Open location popover - use the provided ID
-            opened = False
+            # Click on the popover trigger to open the postal code dialog (as provided)
             try:
-                link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#nav-global-location-popover-link")))
-                cls._safe_click(driver, link)
-                opened = True
-            except Exception as e:
-                logger.warning(f"Selenium: location popover link not clickable: {e}")
+                popover_trigger = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.a-popover-trigger")))
+                cls._safe_click(driver, popover_trigger)
+                time.sleep(random.uniform(2, 4))
+            except Exception:
+                # Fallback to header location link if primary trigger not found
+                try:
+                    link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#nav-global-location-popover-link")))
+                    cls._safe_click(driver, link)
+                    time.sleep(random.uniform(2, 4))
+                except Exception as e:
+                    logger.warning(f"Selenium: location popover not clickable: {e}")
 
             cls.solve_captcha_if_present(driver)
 
-            # If popover didn't open, navigate directly to the address editor page as fallback
-            if not opened:
-                addr_url = f"{cls.AMAZON_AU_BASE}{cls.ADDRESS_EDIT_PATH}"
-                logger.info(f"Selenium: using address editor fallback: {addr_url}")
-                driver.get(addr_url)
-                cls.solve_captcha_if_present(driver)
-                try:
-                    consent2 = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#sp-cc-accept, input#sp-cc-accept, button#sp-cc-accept")))
-                    cls._safe_click(driver, consent2)
-                except Exception:
-                    pass
-
-            # Input: use explicit ID first, then fallbacks
-            input_candidates = [
-                (By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_PostalCodeInput"),
-                (By.CSS_SELECTOR, "input.GLUX_Full_Width"),
-            ]
-
+            # Enter the postal code using provided selector, with fallback to explicit input id
             zip_input = None
-            for by, sel in input_candidates:
+            for by, sel in [
+                (By.CSS_SELECTOR, "input.GLUX_Full_Width"),
+                (By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_PostalCodeInput"),
+            ]:
                 try:
                     zip_input = wait.until(EC.presence_of_element_located((by, sel)))
                     break
@@ -146,7 +137,7 @@ class AmazonAUScrapper:
                     continue
 
             if not zip_input:
-                # Already set zip? check city value/header exists
+                # Already set zip? check header line 2
                 try:
                     line2 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#glow-ingress-line2")))
                     logger.info(f"Selenium: location line2 present: {line2.text}")
@@ -157,51 +148,49 @@ class AmazonAUScrapper:
 
             zip_input.clear()
             zip_input.send_keys(cls.AMAZON_ZIP)
+            time.sleep(random.uniform(1, 3))
 
-            # Click the city dropdown and select first option
+            # Click the apply button (as provided), with fallback variant
             try:
-                drop_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownButton")))
-                cls._safe_click(driver, drop_btn)
-                # First option by explicit ID
+                apply_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
+                cls._safe_click(driver, apply_button)
+            except Exception:
                 try:
-                    first_opt = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownList_0")))
+                    apply_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton .a-button-input")))
+                    cls._safe_click(driver, apply_button)
                 except Exception:
-                    # Fallback: first anchor inside the popover dropdown menu
-                    first_opt = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".a-popover-wrapper .a-popover-inner .a-dropdown-container li a, .a-popover-wrapper .a-popover-inner ul li a")))
-                cls._safe_click(driver, first_opt)
-                logger.info("Selenium: selected first city option")
+                    logger.warning("Selenium: could not click first apply button")
+            time.sleep(random.uniform(2, 4))
+            cls.solve_captcha_if_present(driver)
+
+            # Wait for the city value to be displayed (as provided)
+            try:
+                city_value = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span#GLUXPostalCodeWithCity_CityValue")))
+                logger.info(f"Selenium: City value after ZIP: {city_value.text}")
+            except Exception:
+                logger.warning("Selenium: city value not visible; continuing")
+
+            # Click on the dropdown button and select first option (as provided), with fallbacks
+            try:
+                dropdown_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_DropdownButton span.a-button-text")))
+                cls._safe_click(driver, dropdown_button)
+                time.sleep(random.uniform(2, 4))
+                try:
+                    dropdown_item = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a#GLUXPostalCodeWithCity_DropdownList_0")))
+                except Exception:
+                    dropdown_item = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".a-popover-wrapper .a-popover-inner .a-dropdown-container li a, .a-popover-wrapper .a-popover-inner ul li a")))
+                cls._safe_click(driver, dropdown_item)
+                time.sleep(random.uniform(2, 4))
             except Exception as e:
                 logger.warning(f"Selenium: could not select city option: {e}")
 
-            # Apply button variants
-            applied = False
-            for sel in [
-                "#GLUXPostalCodeWithCityApplyButton input",
-                "#GLUXPostalCodeWithCityApplyButton .a-button-input",
-            ]:
-                try:
-                    btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
-                    if cls._safe_click(driver, btn):
-                        applied = True
-                        break
-                except Exception:
-                    continue
-
-            if not applied:
-                logger.warning("Selenium: apply button not found; trying Enter key")
-                try:
-                    zip_input.send_keys("\n")
-                    applied = True
-                except Exception:
-                    pass
-
-            # Confirm applied: wait for header to reflect location
+            # Click the apply button again (as provided)
             try:
-                line2 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#glow-ingress-line2")))
-                logger.info(f"Selenium: line2 now: {line2.text}")
+                apply_button_again = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#GLUXPostalCodeWithCityApplyButton input")))
+                cls._safe_click(driver, apply_button_again)
+                time.sleep(random.uniform(2, 4))
             except Exception:
-                logger.warning("Selenium: postcode confirmation not visible, retrying sequence once")
-                return cls.set_zip_code(driver)
+                logger.warning("Selenium: could not click second apply button")
 
             logger.info(f"Selenium: Postal code set to {cls.AMAZON_ZIP}")
             return True
@@ -252,11 +241,17 @@ class AmazonAUScrapper:
             if visible_price:
                 main_price = visible_price.get_text(strip=True)
 
-        inv_el = soup.select_one("#availability span")
-        inventory = inv_el.get_text(strip=True) if inv_el else "N/A"
+        # Inventory: use provided selectors first, then fallback to previous
+        inv_text_el = soup.select_one("span.a-color-price.a-text-bold,div.a-spacing-base.a-spacing-top-micro")
+        if inv_text_el:
+            inventory = inv_text_el.get_text(strip=True)
+        else:
+            inv_el = soup.select_one("#availability span")
+            inventory = inv_el.get_text(strip=True) if inv_el else "N/A"
 
-        cu = soup.select_one("span.a-color-price.a-text-bold, .a-spacing-base a.a-button-text")
-        currently_unavailable = cu.get_text(strip=True) if cu else ("In Stock" if 'in stock' in inventory.lower() else 'N/A')
+        # Currently unavailable: provided selectors with default "In Stock"
+        cu_el = soup.select_one("span.a-color-price.a-text-bold, .a-spacing-base a.a-button-text")
+        currently_unavailable = cu_el.get_text(strip=True) if cu_el else "In Stock"
 
         ship_date_el = soup.select_one("#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-text-bold")
         shipping_date = ship_date_el.get_text(strip=True) if ship_date_el else "N/A"
@@ -270,6 +265,7 @@ class AmazonAUScrapper:
         import_el = soup.select_one("#globalStoreBadgePopoverInsideBuybox_feature_div div.a-section")
         import_info = import_el.get_text(strip=True) if import_el else "N-A"
 
+        # Keep handling time extraction for business rules compatibility
         handling_el = soup.find(string=re.compile(r'Usually (?:ships|dispatched) within', re.IGNORECASE))
         handling_time = handling_el.strip() if handling_el else ""
 
