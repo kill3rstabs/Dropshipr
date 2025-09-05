@@ -7,6 +7,7 @@ volumes:
   letsencrypt: {}
   n8n_data: {}
   django_media: {}
+  django_media_stg: {}
 
 services:
   traefik:
@@ -54,6 +55,32 @@ services:
       - "traefik.http.routers.dropshipr-web.entrypoints=web"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.routers.dropshipr-web.middlewares=redirect-to-https"
+    networks: [web]
+
+  web-stg:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dropshipr_web_stg
+    env_file: .env.stg
+    working_dir: /app
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn api.asgi:application --bind 0.0.0.0:8000 --workers 3 --worker-class uvicorn.workers.UvicornWorker"
+    volumes:
+      - django_media_stg:/app/media
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dropshipr-stg.rule=Host(`stg.autoecomm.wesolucions.com`)"
+      - "traefik.http.routers.dropshipr-stg.entrypoints=websecure"
+      - "traefik.http.routers.dropshipr-stg.tls.certresolver=le"
+      - "traefik.http.services.dropshipr-stg.loadbalancer.server.port=8000"
+      # redirect http → https
+      - "traefik.http.routers.dropshipr-stg-web.rule=Host(`stg.autoecomm.wesolucions.com`)"
+      - "traefik.http.routers.dropshipr-stg-web.entrypoints=web"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.dropshipr-stg-web.middlewares=redirect-to-https"
     networks: [web]
 
   n8n:
