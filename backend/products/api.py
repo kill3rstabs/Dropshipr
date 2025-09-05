@@ -2026,7 +2026,7 @@ async def run_ebayau_scraping_job(session_id: str):
             # CSV + email (unchanged, but stats reflect fan-out)
             try:
                 logger.info("=== GENERATING SYSTEM PRODUCTS CSV ===")
-                csv_file_path = generate_system_products_csv()
+                csv_file_path = await asyncio.to_thread(generate_system_products_csv)
                 scraping_stats = {
                     'total_products': total_products,
                     'successful_scrapes': successful_scrapes,
@@ -2260,7 +2260,7 @@ async def run_complete_scraping_job(session_id: str) -> Dict[str, Any]:
         # Generate CSV and send completion email
         try:
             logger.info("=== GENERATING SYSTEM PRODUCTS CSV ===")
-            csv_file_path = generate_system_products_csv()
+            csv_file_path = await asyncio.to_thread(generate_system_products_csv)
             
             # Prepare scraping statistics
             scraping_stats = {
@@ -2741,7 +2741,7 @@ async def run_costcoau_scraping_job(session_id: str):
 
         # Generate system products CSV and email
         try:
-            csv_file_path = generate_system_products_csv()
+            csv_file_path = await asyncio.to_thread(generate_system_products_csv)
             scraping_stats = {
                 'total_products': total_products,
                 'successful_scrapes': total_processed,
