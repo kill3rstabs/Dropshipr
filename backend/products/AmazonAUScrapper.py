@@ -430,22 +430,25 @@ class AmazonAUScrapper:
 
     @classmethod
     async def scrape_with_zip_setup(cls, products_batch: List[Product], driver: webdriver.Chrome) -> List[Dict[str, Any]]:
-        """Scrape products, setting ZIP code on the first product page"""
+        """Scrape products, setting ZIP code on the first available product page"""
         logger.info(f"Batch scrape start for {len(products_batch)} representatives (selenium)")
         t0 = timezone.now()
         results: List[Dict[str, Any]] = []
         
         zip_set = False
+        zip_product_scraped = False
+        
+        # Try up to 5 products to find one with location selector
         for i, p in enumerate(products_batch):
-            # Set ZIP code on first product
-            if not zip_set:
+            if not zip_set and i < 5:  # Try first 5 products max
                 url = cls.build_amazon_au_url(p)
                 if url:
-                    logger.info(f"Setting ZIP code on first product: {url}")
+                    logger.info(f"Attempting to set ZIP code on product {i+1}/5: {url}")
                     if cls.set_zip_code_on_product_page(driver, url):
                         zip_set = True
+                        zip_product_scraped = True
                         logger.info("ZIP code set successfully, now scraping this product")
-                        # Now scrape this first product (we're already on the page)
+                        # Now scrape this product (we're already on the page)
                         data = cls.extract_data_from_current_page(driver, url)
                         error_output = data.get('error_status') or ''
                         success = not bool(error_output)
@@ -459,15 +462,22 @@ class AmazonAUScrapper:
                         if success:
                             result.update(data)
                         results.append(result)
-                        logger.info(f"First product scraped: product_id={p.id} success={success}")
+                        logger.info(f"ZIP setup product scraped: product_id={p.id} success={success}")
                         continue
                     else:
-                        logger.warning("Failed to set ZIP code, continuing without it")
-                        zip_set = True  # Don't keep trying
+                        logger.warning(f"Product {i+1} doesn't have location selector, trying next product...")
+                        # Continue trying other products for ZIP setup
             
+            # If this product was already used for ZIP setup, skip regular scraping
+            if zip_product_scraped and results and results[-1]['product_id'] == p.id:
+                continue
+                
             # Regular scraping for remaining products
             res = await cls.scrape_single(p, driver)
             results.append(res)
+        
+        if not zip_set:
+            logger.warning("Could not set ZIP code on any of the first 5 products - continuing without location setting")
         
         ok = sum(1 for r in results if r.get('success'))
         logger.info(f"Batch scrape end: success={ok} failed={len(results)-ok} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
