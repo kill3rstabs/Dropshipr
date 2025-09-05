@@ -59,7 +59,7 @@ class AmazonAUScrapper:
         # options.add_argument('--window-size=1280,1696')
         options.add_argument('--disable-gpu')
         options.add_argument('--start-maximized')
-        options.add_argument(f'--force-device-scale-factor={0.6}')
+        # options.add_argument(f'--force-device-scale-factor={0.6}')
         options.add_argument('--lang=en-AU')
         # Stabilize
         options.add_argument('--disable-blink-features=AutomationControlled')
