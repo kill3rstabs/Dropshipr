@@ -560,3 +560,16 @@ class AmazonAUScrapper:
             )
             saved += 1
         logger.info(f"Saved {saved}/{len(results)} results to DB") 
+    
+    @classmethod
+    async def process_batch(cls, products_batch: List[Product], driver: webdriver.Chrome) -> List[Dict[str, Any]]:
+        """Regular batch processing without ZIP setup (for rescraping)"""
+        logger.info(f"Batch scrape start for {len(products_batch)} representatives (selenium)")
+        t0 = timezone.now()
+        results: List[Dict[str, Any]] = []
+        for p in products_batch:
+            res = await cls.scrape_single(p, driver)
+            results.append(res)
+        ok = sum(1 for r in results if r.get('success'))
+        logger.info(f"Batch scrape end: success={ok} failed={len(results)-ok} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
+        return results

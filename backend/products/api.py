@@ -2582,8 +2582,15 @@ async def run_amazonau_scraping_job(session_id: str):
         AmazonAUScrapper.set_zoom(driver, 0.5)
         try:
             total_processed = 0
+            first_5_products = []  # Store first 5 products for rescraping
+            
             for i in range(0, total_unique, AmazonAUScrapper.AMAZONAU_BATCH_SIZE):
                 reps_batch = reps[i:i + AmazonAUScrapper.AMAZONAU_BATCH_SIZE]
+                
+                # Store first 5 products for rescraping later
+                if i == 0:
+                    first_5_products = reps_batch[:5]
+                
                 batch_results = await AmazonAUScrapper.scrape_with_zip_setup(reps_batch, driver)
 
                 expanded = []
@@ -2597,6 +2604,24 @@ async def run_amazonau_scraping_job(session_id: str):
                 await sync_to_async(AmazonAUScrapper.save_results)(expanded)
                 total_processed += len(expanded)
                 logger.info(f"AmazonAU progress: {total_processed}/{total_products}")
+
+            # Rescrape the first 5 products at the end for better accuracy
+            if first_5_products:
+                logger.info("=== RESCRAPING FIRST 5 PRODUCTS FOR BETTER ACCURACY ===")
+                rescrape_results = await AmazonAUScrapper.process_batch(first_5_products, driver)
+                
+                # Expand and save rescrape results
+                rescrape_expanded = []
+                for r in rescrape_results:
+                    targets = rep_to_ids.get(r['product_id'], [r['product_id']])
+                    for pid in targets:
+                        nr = dict(r)
+                        nr['product_id'] = pid
+                        expanded.append(nr)
+
+                await sync_to_async(AmazonAUScrapper.save_results)(rescrape_expanded)
+                logger.info(f"Rescraping complete: {len(rescrape_expanded)} products updated")
+                
         finally:
             try:
                 driver.quit()
