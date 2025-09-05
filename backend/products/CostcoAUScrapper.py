@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 class CostcoAUScrapper:
-    COSTCOAU_MAX_CONCURRENT_REQUESTS = 10
+    COSTCOAU_MAX_CONCURRENT_REQUESTS = 5  # Reduced from 10 to match your max_workers=5
     COSTCOAU_BATCH_SIZE = 25
-    COSTCOAU_TIMEOUT = aiohttp.ClientTimeout(total=30)
+    COSTCOAU_TIMEOUT = aiohttp.ClientTimeout(total=60)  # Increased from 30 to 60 seconds
     COSTCOAU_RETRY_LIMIT = 2
 
     USER_AGENTS = [
@@ -52,34 +52,39 @@ class CostcoAUScrapper:
         return f"https://www.costco.com.au/p/{sku}"
 
     @staticmethod
-    def parse_costcoau_details_from_soup(soup: BeautifulSoup, url: str) -> Dict[str, Any]:
+    def parse_costcoau_details_from_soup(soup: BeautifulSoup, url: str, response_text: str) -> Dict[str, Any]:
+        # Extract title
         title_el = soup.select_one('h1')
         title = title_el.get_text(strip=True) if title_el else ''
 
+        # Extract item number
         item_el = soup.select_one('p.product-code')
         item_number = item_el.get_text(strip=True) if item_el else ''
 
+        # Extract price from meta tag
         price_meta = soup.select_one('meta[property="product:price:amount"]')
         price = price_meta['content'] if price_meta and price_meta.has_attr('content') else ''
 
+        # Extract price currency from meta tag
         price_currency_meta = soup.select_one('meta[property="product:price:currency"]')
         price_currency = price_currency_meta['content'] if price_currency_meta and price_currency_meta.has_attr('content') else ''
 
+        # Extract Add to Cart text (exactly like your scraper)
         add_btn = soup.select_one('button.btn-block')
         add_to_cart_text = add_btn.get_text(strip=True) if add_btn else ''
         if not add_to_cart_text:
             add_btn_fallback = soup.select_one('button.notranslate')
             add_to_cart_text = add_btn_fallback.get_text(strip=True) if add_btn_fallback else ''
 
-        # Try 2 patterns for max qty
+        # Extract maximum quantity (exactly like your scraper - using response_text)
         max_quantity = ''
-        m1 = re.search(r';maximum\.quantity\.addtocart&q;:&q;(\d+)&q;', str(soup))
-        if m1:
-            max_quantity = m1.group(1)
+        match1 = re.search(r';maximum\.quantity\.addtocart&q;:&q;(\d+)&q;', response_text)
+        if match1:
+            max_quantity = match1.group(1)
         else:
-            m2 = re.search(r'Costco\.config\.addToCartMaxQty\s*=\s*"(\d+)"', str(soup))
-            if m2:
-                max_quantity = m2.group(1)
+            match2 = re.search(r'Costco\.config\.addToCartMaxQty\s*=\s*"(\d+)"', response_text)
+            if match2:
+                max_quantity = match2.group(1)
 
         return {
             'URL': url,
@@ -94,37 +99,52 @@ class CostcoAUScrapper:
     @classmethod
     async def scrape_single(cls, product: Product, session: aiohttp.ClientSession, retries: int = 0) -> Dict[str, Any]:
         url = cls.build_costco_au_url(product)
+        
+        # Simplified headers - closer to requests default behavior
         headers = {
             'User-Agent': cls.USER_AGENTS[retries % len(cls.USER_AGENTS)],
-            'Accept-Language': 'en-AU,en;q=0.9',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         }
+        
         error_output = ""
         details: Dict[str, Any] = {}
+        
         try:
             start = timezone.now()
             async with session.get(url, timeout=cls.COSTCOAU_TIMEOUT, headers=headers) as response:
                 text = await response.text()
                 status = response.status
-                logger.info(f"CostcoAU fetch: product_id={product.id} status={status} elapsed={(timezone.now()-start).total_seconds():.2f}s")
-                if status >= 500:
+                elapsed = (timezone.now()-start).total_seconds()
+                logger.info(f"CostcoAU fetch: product_id={product.id} status={status} elapsed={elapsed:.2f}s")
+                
+                if status == 200:
+                    soup = BeautifulSoup(text, 'html.parser')
+                    details = cls.parse_costcoau_details_from_soup(soup, url, text)
+                elif status >= 500:
                     error_output = f"Status {status}"
                 else:
-                    soup = BeautifulSoup(text, 'html.parser')
-                    details = cls.parse_costcoau_details_from_soup(soup, url)
+                    error_output = f"Status {status}"
+                    
         except asyncio.TimeoutError:
             if retries < cls.COSTCOAU_RETRY_LIMIT:
-                await asyncio.sleep(1 + retries)
+                await asyncio.sleep(2 + retries)  # Longer delay between retries
                 return await cls.scrape_single(product, session, retries + 1)
             error_output = "Request timed out"
+            logger.warning(f"CostcoAU timeout: product_id={product.id} url={url}")
+            
         except aiohttp.ClientError as e:
             if retries < cls.COSTCOAU_RETRY_LIMIT:
-                await asyncio.sleep(1 + retries)
+                await asyncio.sleep(2 + retries)
                 return await cls.scrape_single(product, session, retries + 1)
             error_output = f"Client error: {str(e)}"
+            logger.warning(f"CostcoAU client error: product_id={product.id} error={e}")
+            
         except Exception as e:
-            logger.error(f"Unexpected error for product_id={product.id}: {e}", exc_info=True)
+            logger.error(f"CostcoAU unexpected error for product_id={product.id}: {e}", exc_info=True)
             error_output = f"Unexpected error: {str(e)}"
 
         return {
@@ -138,7 +158,14 @@ class CostcoAUScrapper:
 
     @classmethod
     async def process_batch(cls, products_batch: List[Product], session: aiohttp.ClientSession) -> List[Dict[str, Any]]:
-        tasks = [cls.scrape_single(p, session) for p in products_batch]
+        # Use semaphore to limit concurrent requests (like ThreadPoolExecutor max_workers=5)
+        semaphore = asyncio.Semaphore(cls.COSTCOAU_MAX_CONCURRENT_REQUESTS)
+        
+        async def scrape_with_semaphore(product):
+            async with semaphore:
+                return await cls.scrape_single(product, session)
+        
+        tasks = [scrape_with_semaphore(p) for p in products_batch]
         return await asyncio.gather(*tasks)
 
     @classmethod
@@ -195,4 +222,4 @@ class CostcoAUScrapper:
                 }
             )
             saved += 1
-        logger.info(f"Saved {saved}/{len(results)} CostcoAU results to DB") 
+        logger.info(f"Saved {saved}/{len(results)} CostcoAU results to DB")
