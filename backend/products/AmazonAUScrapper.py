@@ -25,6 +25,8 @@ from selenium.webdriver.chrome.options import Options
 import time
 # Amazon captcha solver
 from amazoncaptcha import AmazonCaptcha
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 
 
 logger = logging.getLogger(__name__)
@@ -50,12 +52,14 @@ class AmazonAUScrapper:
     def create_driver(cls) -> webdriver.Chrome:
         options = Options()
         # Headless is recommended in server
+        options.add_argument('--window-size=6000,7100')  
         options.add_argument('--headless=new')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--window-size=1280,1696')
+        # options.add_argument('--window-size=1280,1696')
         options.add_argument('--disable-gpu')
         options.add_argument('--start-maximized')
+        options.add_argument(f'--force-device-scale-factor={0.6}')
         options.add_argument('--lang=en-AU')
         # Stabilize
         options.add_argument('--disable-blink-features=AutomationControlled')
@@ -92,11 +96,76 @@ class AmazonAUScrapper:
             return True
         except Exception:
             return False
+        
+    @classmethod
+    def set_zoom(cls, driver: webdriver.Chrome, target: float = 0.5) -> None:
+        """
+        Tries, in order:
+        1) CDP Emulation.setPageScaleFactor (best in headless)
+        2) Keyboard zoom (Ctrl+0, then Ctrl+- N times) for non-headless
+        3) CSS transform fallback (with width compensation)
+        Re-apply this after each navigation.
+        """
+        # --- 1) CDP page scale ---
+        try:
+            size = driver.get_window_size()
+            # Ensure metrics are set before scaling
+            driver.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
+                "mobile": False,
+                "width": size.get("width", 1600),
+                "height": size.get("height", 2200),
+                "deviceScaleFactor": 1,
+                "screenWidth": size.get("width", 1600),
+                "screenHeight": size.get("height", 2200),
+                "positionX": 0,
+                "positionY": 0,
+            })
+            driver.execute_cdp_cmd("Emulation.setPageScaleFactor", {"pageScaleFactor": target})
+            time.sleep(0.1)
+            return
+        except Exception as e:
+            logger.debug(f"CDP zoom failed: {e}")
+
+        # --- 2) Keyboard zoom (non-headless typical) ---
+        try:
+            # Focus the <html> so zoom shortcuts work
+            html = driver.find_element(By.TAG_NAME, "html")
+            actions = ActionChains(driver)
+
+            # Reset to 100%
+            actions.key_down(Keys.CONTROL).send_keys("0").key_up(Keys.CONTROL).perform()
+            time.sleep(0.05)
+
+            # Chrome zoom steps: 100 → 90 → 80 → 67 → 50 → 33 → 25
+            # To reach 50% from 100%, press Ctrl+- 5 times
+            for _ in range(5):
+                actions.key_down(Keys.CONTROL).send_keys("-").key_up(Keys.CONTROL).perform()
+                time.sleep(0.05)
+            return
+        except Exception as e:
+            logger.debug(f"Keyboard zoom failed: {e}")
+
+        # --- 3) CSS fallback ---
+        try:
+            # Scale the layout and compensate width so content fits viewport
+            driver.execute_script("""
+                (function(s){
+                    document.documentElement.style.zoom = '';
+                    document.body.style.transformOrigin = '0 0';
+                    document.body.style.transform = 'scale(' + s + ')';
+                    document.body.style.width = (100 / s) + '%';
+                })(arguments[0]);
+            """, target)
+            time.sleep(0.05)
+        except Exception as e:
+            logger.debug(f"CSS zoom fallback failed: {e}")
 
     @classmethod
-    def set_zip_code(cls, driver: webdriver.Chrome) -> bool:
+    def set_zip_code_on_product_page(cls, driver: webdriver.Chrome, product_url: str) -> bool:
+        """Set ZIP code on a product page where the location selector is available"""
         try:
-            driver.get(cls.AMAZON_AU_BASE)
+            driver.get(product_url)
+            cls.set_zoom(driver, 0.5)
             cls.solve_captcha_if_present(driver)
             wait = WebDriverWait(driver, 20)
 
@@ -108,19 +177,30 @@ class AmazonAUScrapper:
             except Exception:
                 pass
 
-            # Click on the popover trigger to open the postal code dialog (as provided)
-            try:
-                popover_trigger = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.a-popover-trigger")))
-                cls._safe_click(driver, popover_trigger)
-                time.sleep(random.uniform(2, 4))
-            except Exception:
-                # Fallback to header location link if primary trigger not found
+            # Look for location selector on product page - try multiple selectors
+            location_selectors = [
+                "#contextualIngressPt",  # Common location selector on product pages
+                "#glow-ingress-block",   # Alternative location block
+                "a[data-csa-c-content-id='nav_cs_1']",  # Navigation location link
+                "#nav-global-location-popover-link",    # Header location link
+                "a.a-popover-trigger"   # Generic popover trigger
+            ]
+
+            location_clicked = False
+            for selector in location_selectors:
                 try:
-                    link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#nav-global-location-popover-link")))
-                    cls._safe_click(driver, link)
+                    location_element = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    cls._safe_click(driver, location_element)
                     time.sleep(random.uniform(2, 4))
-                except Exception as e:
-                    logger.warning(f"Selenium: location popover not clickable: {e}")
+                    location_clicked = True
+                    logger.info(f"Selenium: clicked location selector: {selector}")
+                    break
+                except Exception:
+                    continue
+
+            if not location_clicked:
+                logger.warning("Selenium: no location selector found on product page")
+                return False
 
             cls.solve_captcha_if_present(driver)
 
@@ -129,6 +209,8 @@ class AmazonAUScrapper:
             for by, sel in [
                 (By.CSS_SELECTOR, "input.GLUX_Full_Width"),
                 (By.CSS_SELECTOR, "#GLUXPostalCodeWithCity_PostalCodeInput"),
+                (By.CSS_SELECTOR, "input[placeholder*='postal']"),
+                (By.CSS_SELECTOR, "input[placeholder*='zip']"),
             ]:
                 try:
                     zip_input = wait.until(EC.presence_of_element_located((by, sel)))
@@ -143,7 +225,7 @@ class AmazonAUScrapper:
                     logger.info(f"Selenium: location line2 present: {line2.text}")
                     return True
                 except Exception:
-                    logger.error("Selenium: postcode input not found")
+                    logger.error("Selenium: postcode input not found on product page")
                     return False
 
             zip_input.clear()
@@ -192,7 +274,19 @@ class AmazonAUScrapper:
             except Exception:
                 logger.warning("Selenium: could not click second apply button")
 
-            logger.info(f"Selenium: Postal code set to {cls.AMAZON_ZIP}")
+            # Reload the page 2 times after setting ZIP code to ensure it takes effect
+            logger.info("Reloading page 2 times after ZIP code change...")
+            for reload_count in range(2):
+                try:
+                    driver.refresh()
+                    cls.set_zoom(driver, 0.5)
+                    time.sleep(random.uniform(2, 3))
+                    cls.solve_captcha_if_present(driver)
+                    logger.info(f"Page reload {reload_count + 1}/2 completed")
+                except Exception as e:
+                    logger.warning(f"Error during reload {reload_count + 1}: {e}")
+
+            logger.info(f"Selenium: Postal code set to {cls.AMAZON_ZIP} on product page and page reloaded 2 times")
             return True
         except Exception as e:
             # Dump minimal debug info
@@ -200,7 +294,7 @@ class AmazonAUScrapper:
                 title = driver.title
             except Exception:
                 title = "<no title>"
-            logger.error(f"Error setting postal code via Selenium: {e} | title={title}")
+            logger.error(f"Error setting postal code on product page: {e} | title={title}")
             return False
 
     @staticmethod
@@ -289,6 +383,7 @@ class AmazonAUScrapper:
     def extract_data_with_driver(cls, url: str, driver: webdriver.Chrome) -> Dict[str, Any]:
         try:
             driver.get(url)
+            cls.set_zoom(driver, 0.6)
             cls.solve_captcha_if_present(driver)
             html = driver.page_source
             soup = BeautifulSoup(html, 'html.parser')
@@ -334,16 +429,66 @@ class AmazonAUScrapper:
         return result
 
     @classmethod
-    async def process_batch(cls, products_batch: List[Product], driver: webdriver.Chrome) -> List[Dict[str, Any]]:
+    async def scrape_with_zip_setup(cls, products_batch: List[Product], driver: webdriver.Chrome) -> List[Dict[str, Any]]:
+        """Scrape products, setting ZIP code on the first product page"""
         logger.info(f"Batch scrape start for {len(products_batch)} representatives (selenium)")
         t0 = timezone.now()
         results: List[Dict[str, Any]] = []
-        for p in products_batch:
+        
+        zip_set = False
+        for i, p in enumerate(products_batch):
+            # Set ZIP code on first product
+            if not zip_set:
+                url = cls.build_amazon_au_url(p)
+                if url:
+                    logger.info(f"Setting ZIP code on first product: {url}")
+                    if cls.set_zip_code_on_product_page(driver, url):
+                        zip_set = True
+                        logger.info("ZIP code set successfully, now scraping this product")
+                        # Now scrape this first product (we're already on the page)
+                        data = cls.extract_data_from_current_page(driver, url)
+                        error_output = data.get('error_status') or ''
+                        success = not bool(error_output)
+                        result = {
+                            'product_id': p.id,
+                            'vendor_sku': p.vendor_sku,
+                            'url': url,
+                            'success': success,
+                            'error_status': error_output,
+                        }
+                        if success:
+                            result.update(data)
+                        results.append(result)
+                        logger.info(f"First product scraped: product_id={p.id} success={success}")
+                        continue
+                    else:
+                        logger.warning("Failed to set ZIP code, continuing without it")
+                        zip_set = True  # Don't keep trying
+            
+            # Regular scraping for remaining products
             res = await cls.scrape_single(p, driver)
             results.append(res)
+        
         ok = sum(1 for r in results if r.get('success'))
         logger.info(f"Batch scrape end: success={ok} failed={len(results)-ok} elapsed={(timezone.now()-t0).total_seconds():.2f}s")
         return results
+
+    @classmethod
+    def extract_data_from_current_page(cls, driver: webdriver.Chrome, url: str) -> Dict[str, Any]:
+        """Extract data from current page without navigating"""
+        try:
+            cls.solve_captcha_if_present(driver)
+            html = driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+            # Detect 500 errors
+            if 'HTTP ERROR 500' in html or 'Internal Server Error' in html:
+                return { 'error_status': 'Status 500' }
+            details = cls.parse_amazonau_details_from_soup(soup, url)
+            details['error_status'] = ''
+            return details
+        except Exception as e:
+            logger.error(f"Selenium extract error for current page {url}: {e}")
+            return { 'error_status': f"Exception: {e}" }
 
     @classmethod
     @transaction.atomic

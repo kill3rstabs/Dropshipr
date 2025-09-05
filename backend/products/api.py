@@ -2578,14 +2578,13 @@ async def run_amazonau_scraping_job(session_id: str):
         total_unique = len(reps)
 
         driver = AmazonAUScrapper.create_driver()
+        driver.maximize_window()
+        AmazonAUScrapper.set_zoom(driver, 0.5)
         try:
-            if not AmazonAUScrapper.set_zip_code(driver):
-                logger.warning("Selenium: failed to set ZIP; continuing anyway")
-
             total_processed = 0
             for i in range(0, total_unique, AmazonAUScrapper.AMAZONAU_BATCH_SIZE):
                 reps_batch = reps[i:i + AmazonAUScrapper.AMAZONAU_BATCH_SIZE]
-                batch_results = await AmazonAUScrapper.process_batch(reps_batch, driver)
+                batch_results = await AmazonAUScrapper.scrape_with_zip_setup(reps_batch, driver)
 
                 expanded = []
                 for r in batch_results:
